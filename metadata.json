@@ -1,0 +1,8 @@
+{
+  "name": "MedAI Pro - Digital Physician",
+  "description": "An advanced AI-powered physician for the Indian context with multi-modal diagnostic capabilities, visual analysis, and long-term medical memory.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
