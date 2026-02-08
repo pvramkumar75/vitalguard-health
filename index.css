@@ -1,5 +1,24 @@
 /* VitalGuard Health - Global Styles */
 
+/* =================================
+   RESPONSIVE DESIGN ENHANCEMENTS
+   ================================= */
+
+/* Base responsive styles */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
+}
+
 /* Animations for slide-in effects */
 @keyframes fade-in {
   from { opacity: 0; }
@@ -50,7 +69,11 @@
   animation-delay: 150ms;
 }
 
-/* Scrollbar styling */
+/* =================================
+   SCROLLBAR STYLING
+   ================================= */
+
+/* Desktop scrollbar */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
@@ -70,7 +93,18 @@
   background: linear-gradient(135deg, #2563eb, #0891b2);
 }
 
-/* File upload styling improvements */
+/* Mobile scrollbar - thinner for touch devices */
+@media (max-width: 768px) {
+  ::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+}
+
+/* =================================
+   FILE UPLOAD STYLING
+   ================================= */
+
 input[type="file"]::-webkit-file-upload-button {
   background: linear-gradient(135deg, #3b82f6, #06b6d4);
   color: white;
@@ -86,6 +120,18 @@ input[type="file"]::-webkit-file-upload-button:hover {
   filter: brightness(1.1);
 }
 
+/* Mobile file upload button adjustments */
+@media (max-width: 640px) {
+  input[type="file"]::-webkit-file-upload-button {
+    padding: 0.4rem 0.8rem;
+    font-size: 0.875rem;
+  }
+}
+
+/* =================================
+   ACCESSIBILITY & INTERACTIONS
+   ================================= */
+
 /* Focus states for accessibility */
 *:focus-visible {
   outline: 2px solid #3b82f6;
@@ -95,4 +141,117 @@ input[type="file"]::-webkit-file-upload-button:hover {
 /* Smooth transitions for interactive elements */
 button, a, input, select, textarea {
   transition: all 0.15s ease-in-out;
+}
+
+/* Touch-friendly tap targets on mobile */
+@media (max-width: 768px) {
+  button, a, input[type="checkbox"], input[type="radio"] {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
+
+/* =================================
+   RESPONSIVE TEXT SCALING
+   ================================= */
+
+/* Prevent text size adjustment on orientation change (mobile) */
+@media (max-width: 768px) {
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+}
+
+/* =================================
+   RESPONSIVE UTILITIES
+   ================================= */
+
+/* Hide scrollbar but keep functionality on mobile */
+@media (max-width: 640px) {
+  .mobile-hide-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  
+  .mobile-hide-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* Prevent horizontal overflow on mobile */
+@media (max-width: 768px) {
+  .prevent-overflow {
+    max-width: 100vw;
+    overflow-x: hidden;
+  }
+}
+
+/* =================================
+   TOUCH OPTIMIZATIONS
+   ================================= */
+
+/* Better touch feedback */
+@media (hover: none) and (pointer: coarse) {
+  button:active {
+    transform: scale(0.97);
+  }
+  
+  .touch-scale:active {
+    transform: scale(0.95);
+  }
+}
+
+/* =================================
+   SAFE AREA FOR NOTCH DEVICES
+   ================================= */
+
+/* Support for devices with notches (iPhone X, etc.) */
+@supports (padding: max(0px)) {
+  body {
+    padding-left: max(0px, env(safe-area-inset-left));
+    padding-right: max(0px, env(safe-area-inset-right));
+  }
+}
+
+/* =================================
+   PRINT STYLES
+   ================================= */
+
+@media print {
+  /* Hide decorative elements when printing */
+  .no-print {
+    display: none !important;
+  }
+  
+  /* Show print-only elements */
+  .print-only {
+    display: block !important;
+  }
+  
+  /* Optimize page breaks */
+  * {
+    page-break-inside: avoid;
+  }
+  
+  /* Remove shadows and backgrounds for better print */
+  body {
+    background: white !important;
+  }
+  
+  .shadow-2xl, .shadow-xl, .shadow-lg {
+    box-shadow: none !important;
+  }
+}
+
+/* =================================
+   LANDSCAPE MOBILE OPTIMIZATIONS
+   ================================= */
+
+@media (max-width: 768px) and (orientation: landscape) {
+  /* Reduce vertical spacing in landscape mode */
+  .mobile-landscape-compact {
+    padding-top: 0.5rem;
+    padding-bottom: 0.5rem;
+  }
 }
