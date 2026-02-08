@@ -571,44 +571,43 @@ const ChatInterface: React.FC<{
     setIsUploading(true);
     setUploadStatus('Reading files...');
     const newAttachments: Attachment[] = [];
-    let extractedTexts: string[] = [];
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
-      const ext = file.name.split('.').pop()?.toLowerCase() || '';
       setUploadStatus(`Processing ${file.name} (${i + 1}/${files.length})...`);
 
       const base64 = await blobToBase64(file);
       const mimeType = file.type || 'application/octet-stream';
 
-      // Only attach as inlineData if Gemini supports this MIME type
-      if (GEMINI_SUPPORTED_INLINE_TYPES.has(mimeType) || file.type.startsWith('image/')) {
-        newAttachments.push({ data: base64, mimeType, name: file.name });
-      } else {
-        // For unsupported types, attach a placeholder so the user sees it in the UI
-        newAttachments.push({ data: '', mimeType: 'text/plain', name: file.name });
-      }
-
-      // Extract text from ALL document types
+      // Extract text from documents (this will be passed to AI invisibly)
+      let extractedText = '';
       try {
         setUploadStatus(`Extracting text from ${file.name}...`);
-        const extractedText = await extractDocumentText(file);
-        if (extractedText.trim()) {
-          extractedTexts.push(`[Content from ${file.name}]:\n${extractedText.trim()}`);
-        }
+        extractedText = await extractDocumentText(file);
       } catch (err) {
         console.error(`Text extraction failed for ${file.name}:`, err);
+      }
+
+      // Only attach as inlineData if Gemini supports this MIME type
+      if (GEMINI_SUPPORTED_INLINE_TYPES.has(mimeType) || file.type.startsWith('image/')) {
+        newAttachments.push({ 
+          data: base64, 
+          mimeType, 
+          name: file.name,
+          extractedText: extractedText.trim() || undefined
+        });
+      } else {
+        // For unsupported types, attach a placeholder so the user sees it in the UI
+        newAttachments.push({ 
+          data: '', 
+          mimeType: 'text/plain', 
+          name: file.name,
+          extractedText: extractedText.trim() || undefined
+        });
       }
     }
 
     setAttachments(prev => [...prev, ...newAttachments]);
-
-    // Add all extracted text to the input field
-    if (extractedTexts.length > 0) {
-      const extractedMessage = `Document Analysis:\n${extractedTexts.join('\n\n')}`;
-      setInput(prev => prev ? prev + '\n\n' + extractedMessage : extractedMessage);
-    }
-
     setIsUploading(false);
     setUploadStatus('');
     e.target.value = '';
