@@ -4,6 +4,10 @@ import { AppStep, PatientInfo, Message, MedicalReport, ClinicalRecord, Attachmen
 import { getChatResponse, getMedicalReport } from './services/geminiService';
 import * as db from './db';
 import Tesseract from 'tesseract.js';
+import * as pdfjsLib from 'pdfjs-dist';
+
+// Configure PDF.js worker
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
 // --- Utilities ---
 const blobToBase64 = (blob: Blob): Promise<string> => {
@@ -16,6 +20,223 @@ const blobToBase64 = (blob: Blob): Promise<string> => {
     reader.onerror = reject;
     reader.readAsDataURL(blob);
   });
+};
+
+// MIME types that Gemini supports for inlineData
+const GEMINI_SUPPORTED_INLINE_TYPES = new Set([
+  'image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/heic', 'image/heif', 'image/gif', 'image/bmp', 'image/tiff',
+  'application/pdf',
+  'text/plain', 'text/csv', 'text/html',
+]);
+
+// --- Document Text Extraction Utilities ---
+
+const extractPdfText = async (file: File): Promise<string> => {
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
+    let fullText = '';
+
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const textContent = await page.getTextContent();
+      const pageText = (textContent.items as any[]).map((item: any) => item.str).join(' ');
+      if (pageText.trim()) fullText += `[Page ${i}] ${pageText}\n`;
+    }
+
+    if (fullText.trim()) return fullText.trim();
+
+    // Fallback: render scanned PDF pages to images and OCR them
+    const ocrTexts: string[] = [];
+    for (let i = 1; i <= Math.min(pdf.numPages, 10); i++) {
+      const page = await pdf.getPage(i);
+      const viewport = page.getViewport({ scale: 2.0 });
+      const canvas = document.createElement('canvas');
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      const ctx = canvas.getContext('2d')!;
+      await page.render({ canvasContext: ctx, viewport }).promise;
+
+      const blob = await new Promise<Blob>((resolve) =>
+        canvas.toBlob((b) => resolve(b!), 'image/png')
+      );
+      const { data: { text } } = await Tesseract.recognize(blob, 'eng');
+      if (text.trim()) ocrTexts.push(`[Page ${i}] ${text.trim()}`);
+    }
+
+    return ocrTexts.join('\n\n');
+  } catch (err) {
+    console.error('PDF extraction failed:', err);
+    return '';
+  }
+};
+
+const extractDocxText = async (file: File): Promise<string> => {
+  try {
+    const mammoth = await import('mammoth');
+    const arrayBuffer = await file.arrayBuffer();
+    const result = await mammoth.extractRawText({ arrayBuffer });
+    return result.value;
+  } catch (err) {
+    console.error('DOCX extraction failed:', err);
+    return '';
+  }
+};
+
+const extractPptxText = async (file: File): Promise<string> => {
+  try {
+    const JSZip = (await import('jszip')).default;
+    const arrayBuffer = await file.arrayBuffer();
+    const zip = await JSZip.loadAsync(arrayBuffer);
+
+    const texts: string[] = [];
+    const slideFiles = Object.keys(zip.files)
+      .filter((name) => /ppt\/slides\/slide\d+\.xml/.test(name))
+      .sort((a, b) => {
+        const numA = parseInt(a.match(/slide(\d+)/)?.[1] || '0');
+        const numB = parseInt(b.match(/slide(\d+)/)?.[1] || '0');
+        return numA - numB;
+      });
+
+    for (const slidePath of slideFiles) {
+      const content = await zip.file(slidePath)?.async('text');
+      if (content) {
+        const textElements = content.match(/<a:t>([^<]*)<\/a:t>/g) || [];
+        const slideText = textElements.map((t) => t.replace(/<[^>]+>/g, '')).join(' ');
+        if (slideText.trim()) {
+          const slideNum = slidePath.match(/slide(\d+)/)?.[1];
+          texts.push(`[Slide ${slideNum}] ${slideText.trim()}`);
+        }
+      }
+    }
+
+    return texts.join('\n');
+  } catch (err) {
+    console.error('PPTX extraction failed:', err);
+    return '';
+  }
+};
+
+const extractXlsxText = async (file: File): Promise<string> => {
+  try {
+    const JSZip = (await import('jszip')).default;
+    const arrayBuffer = await file.arrayBuffer();
+    const zip = await JSZip.loadAsync(arrayBuffer);
+
+    // Get shared strings
+    const sharedStringsFile = zip.file('xl/sharedStrings.xml');
+    let sharedStrings: string[] = [];
+    if (sharedStringsFile) {
+      const content = await sharedStringsFile.async('text');
+      const matches = content.match(/<t[^>]*>([^<]+)<\/t>/g) || [];
+      sharedStrings = matches.map((m) => m.replace(/<[^>]+>/g, ''));
+    }
+
+    const sheetFiles = Object.keys(zip.files)
+      .filter((name) => /xl\/worksheets\/sheet\d+\.xml/.test(name))
+      .sort();
+
+    const rows: string[] = [];
+    for (const sheetPath of sheetFiles) {
+      const content = await zip.file(sheetPath)?.async('text');
+      if (content) {
+        const rowMatches = content.match(/<row[^>]*>[\s\S]*?<\/row>/g) || [];
+        for (const row of rowMatches) {
+          const cellValues = row.match(/<v>([^<]+)<\/v>/g) || [];
+          const values = cellValues.map((c) => {
+            const val = c.replace(/<[^>]+>/g, '');
+            const idx = parseInt(val);
+            return !isNaN(idx) && sharedStrings[idx] ? sharedStrings[idx] : val;
+          });
+          if (values.length) rows.push(values.join('\t'));
+        }
+      }
+    }
+
+    return rows.join('\n') || sharedStrings.join(' ');
+  } catch (err) {
+    console.error('XLSX extraction failed:', err);
+    return '';
+  }
+};
+
+const extractBinaryDocText = async (file: File): Promise<string> => {
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    const bytes = new Uint8Array(arrayBuffer);
+    const chunks: string[] = [];
+    let current = '';
+
+    for (let i = 0; i < bytes.length; i++) {
+      const byte = bytes[i];
+      if (byte >= 32 && byte <= 126) {
+        current += String.fromCharCode(byte);
+      } else if (byte === 10 || byte === 13) {
+        current += ' ';
+      } else {
+        if (current.trim().length > 3) {
+          chunks.push(current.trim());
+        }
+        current = '';
+      }
+    }
+    if (current.trim().length > 3) chunks.push(current.trim());
+
+    return chunks.join(' ').replace(/\s+/g, ' ').substring(0, 15000);
+  } catch (err) {
+    console.error('Binary text extraction failed:', err);
+    return '';
+  }
+};
+
+const extractDocumentText = async (file: File): Promise<string> => {
+  const ext = file.name.split('.').pop()?.toLowerCase() || '';
+
+  try {
+    // Plain text files
+    if (
+      ['txt', 'csv', 'md', 'json', 'xml', 'html', 'htm', 'log', 'rtf'].includes(ext) ||
+      file.type.startsWith('text/')
+    ) {
+      return await file.text();
+    }
+
+    // Images - Tesseract OCR
+    if (file.type.startsWith('image/')) {
+      const { data: { text } } = await Tesseract.recognize(file, 'eng');
+      return text;
+    }
+
+    // PDF - text layer extraction with OCR fallback for scanned docs
+    if (ext === 'pdf' || file.type === 'application/pdf') {
+      return await extractPdfText(file);
+    }
+
+    // DOCX
+    if (ext === 'docx' || file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+      return await extractDocxText(file);
+    }
+
+    // PPTX
+    if (ext === 'pptx' || file.type === 'application/vnd.openxmlformats-officedocument.presentationml.presentation') {
+      return await extractPptxText(file);
+    }
+
+    // XLSX
+    if (ext === 'xlsx' || file.type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet') {
+      return await extractXlsxText(file);
+    }
+
+    // Old binary formats (doc, ppt, xls) - best effort text extraction
+    if (['doc', 'ppt', 'xls'].includes(ext)) {
+      return await extractBinaryDocText(file);
+    }
+
+    return '';
+  } catch (err) {
+    console.error(`Document extraction failed for ${file.name}:`, err);
+    return '';
+  }
 };
 
 // --- Sub-components ---
@@ -87,19 +308,19 @@ const LanguageSwitcher: React.FC<{ current: Language; onChange: (l: Language) =>
   ];
 
   return (
-    <div className="flex gap-2 bg-gradient-to-r from-slate-100 to-slate-50 p-1.5 rounded-2xl border-2 border-slate-200 shadow-md no-print relative overflow-hidden">
+    <div className="flex gap-1 md:gap-2 bg-gradient-to-r from-slate-100 to-slate-50 p-1 md:p-1.5 rounded-xl md:rounded-2xl border-2 border-slate-200 shadow-md no-print relative overflow-hidden">
       <div className="absolute inset-0 bg-gradient-to-r from-blue-100/20 to-cyan-100/20 opacity-0 hover:opacity-100 transition-opacity pointer-events-none"></div>
       {langs.map((l) => (
         <button
           key={l.id}
           onClick={() => onChange(l.id)}
-          className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all relative z-10 group ${current === l.id
+          className={`px-2 md:px-4 py-1.5 md:py-2 rounded-lg md:rounded-xl text-[8px] md:text-[10px] font-black uppercase tracking-wider md:tracking-widest transition-all relative z-10 group ${current === l.id
             ? 'bg-gradient-to-r from-blue-600 to-cyan-600 text-white shadow-lg shadow-blue-300/50 scale-105'
             : 'text-slate-500 hover:text-slate-700 hover:bg-white/80 hover:shadow-sm'
             }`}
         >
           <span className="block">{l.label}</span>
-          <span className="block text-[8px] opacity-70 font-medium">{l.native}</span>
+          <span className="block text-[7px] md:text-[8px] opacity-70 font-medium hidden sm:block">{l.native}</span>
         </button>
       ))}
     </div>
@@ -121,7 +342,7 @@ const VitalsForm: React.FC<{
   };
 
   return (
-    <div className="max-w-2xl mx-auto bg-white rounded-[2.5rem] shadow-2xl p-10 border border-slate-100 animate-in fade-in slide-in-from-bottom-6 duration-700 relative overflow-hidden">
+    <div className="max-w-2xl mx-auto bg-white rounded-[2.5rem] md:rounded-[2.5rem] rounded-3xl shadow-2xl p-5 md:p-10 border border-slate-100 animate-in fade-in slide-in-from-bottom-6 duration-700 relative overflow-hidden">
       {/* Decorative background gradient */}
       <div className="absolute top-0 right-0 w-64 h-64 bg-gradient-to-br from-blue-100 to-cyan-50 rounded-full blur-3xl opacity-30 -z-10"></div>
       <div className="absolute bottom-0 left-0 w-48 h-48 bg-gradient-to-tr from-cyan-100 to-blue-50 rounded-full blur-3xl opacity-30 -z-10"></div>
@@ -156,7 +377,7 @@ const VitalsForm: React.FC<{
           />
         </div>
 
-        <div className="grid grid-cols-2 gap-5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
           <div>
             <label className="block text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-2 flex items-center gap-2">
               <span className="w-1.5 h-1.5 rounded-full bg-cyan-500"></span>
@@ -202,7 +423,7 @@ const VitalsForm: React.FC<{
         </button>
 
         {showVitals && (
-          <div className="grid grid-cols-2 gap-5 p-6 bg-gradient-to-br from-blue-50 to-cyan-50 rounded-2xl border-2 border-blue-100 animate-in slide-in-from-top duration-300">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 p-4 md:p-6 bg-gradient-to-br from-blue-50 to-cyan-50 rounded-2xl border-2 border-blue-100 animate-in slide-in-from-top duration-300">
             <div>
               <label className="block text-[10px] font-black text-blue-700 uppercase tracking-[0.2em] mb-2">Weight (kg)</label>
               <input
@@ -282,6 +503,8 @@ const ChatInterface: React.FC<{
   const [micError, setMicError] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [isCapturing, setIsCapturing] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadStatus, setUploadStatus] = useState<string>('');
   const [selectedCheckboxOptions, setSelectedCheckboxOptions] = useState<string[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -341,60 +564,52 @@ const ChatInterface: React.FC<{
     }
   };
 
-  const extractOCRText = async (file: File): Promise<string> => {
-    try {
-      if (file.type.startsWith('image/')) {
-        // For images, use Tesseract OCR
-        const { data: { text } } = await Tesseract.recognize(file, 'eng');
-        return text;
-      }
-      return '';
-    } catch (err) {
-      console.error('OCR error:', err);
-      return '';
-    }
-  };
-
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
-    setIsProcessing(true);
+    setIsUploading(true);
+    setUploadStatus('Reading files...');
     const newAttachments: Attachment[] = [];
-    let extractedTexts: string[] = [];
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
+      setUploadStatus(`Processing ${file.name} (${i + 1}/${files.length})...`);
+
       const base64 = await blobToBase64(file);
+      const mimeType = file.type || 'application/octet-stream';
 
-      newAttachments.push({
-        data: base64,
-        mimeType: file.type || 'application/octet-stream',
-        name: file.name
-      });
+      // Extract text from documents (this will be passed to AI invisibly)
+      let extractedText = '';
+      try {
+        setUploadStatus(`Extracting text from ${file.name}...`);
+        extractedText = await extractDocumentText(file);
+      } catch (err) {
+        console.error(`Text extraction failed for ${file.name}:`, err);
+      }
 
-      // Extract text from documents
-      if (file.type.startsWith('image/')) {
-        try {
-          const ocrText = await extractOCRText(file);
-          if (ocrText.trim()) {
-            extractedTexts.push(`[${file.name}]: ${ocrText}`);
-          }
-        } catch (err) {
-          console.error(`OCR failed for ${file.name}:`, err);
-        }
+      // Only attach as inlineData if Gemini supports this MIME type
+      if (GEMINI_SUPPORTED_INLINE_TYPES.has(mimeType) || file.type.startsWith('image/')) {
+        newAttachments.push({ 
+          data: base64, 
+          mimeType, 
+          name: file.name,
+          extractedText: extractedText.trim() || undefined
+        });
+      } else {
+        // For unsupported types, attach a placeholder so the user sees it in the UI
+        newAttachments.push({ 
+          data: '', 
+          mimeType: 'text/plain', 
+          name: file.name,
+          extractedText: extractedText.trim() || undefined
+        });
       }
     }
 
     setAttachments(prev => [...prev, ...newAttachments]);
-
-    // Add extracted text to input if OCR found text
-    if (extractedTexts.length > 0) {
-      const extractedMessage = `Document Analysis:\n${extractedTexts.join('\n\n')}`;
-      setInput(prev => prev ? prev + '\n\n' + extractedMessage : extractedMessage);
-    }
-
-    setIsProcessing(false);
+    setIsUploading(false);
+    setUploadStatus('');
     e.target.value = '';
   };
 
@@ -441,7 +656,7 @@ const ChatInterface: React.FC<{
 
   const handleSend = (e: React.FormEvent) => {
     e.preventDefault();
-    if ((!input.trim() && attachments.length === 0 && selectedCheckboxOptions.length === 0) || isProcessing) return;
+    if ((!input.trim() && attachments.length === 0 && selectedCheckboxOptions.length === 0) || isProcessing || isUploading) return;
 
     let messageToSend = input.trim();
     if (selectedCheckboxOptions.length > 0 && !messageToSend) {
@@ -456,8 +671,8 @@ const ChatInterface: React.FC<{
   };
 
   return (
-    <div className="flex flex-col h-[780px] bg-white rounded-[2.5rem] shadow-2xl overflow-hidden border border-slate-100 relative">
-      <div className="bg-slate-900 text-white px-8 py-6 flex justify-between items-center relative z-10">
+    <div className="flex flex-col h-[calc(100vh-8rem)] md:h-[780px] bg-white rounded-2xl md:rounded-[2.5rem] shadow-2xl overflow-hidden border border-slate-100 relative">
+      <div className="bg-slate-900 text-white px-4 md:px-8 py-4 md:py-6 flex justify-between items-center relative z-10">
         <div className="flex items-center gap-4">
           <div className="w-12 h-12 bg-blue-600 rounded-2xl flex items-center justify-center font-black border-2 border-slate-800 text-lg shadow-inner">Dr</div>
           <div>
@@ -474,11 +689,11 @@ const ChatInterface: React.FC<{
         </button>
       </div>
 
-      <div ref={scrollRef} className="flex-1 overflow-y-auto p-8 space-y-8 bg-slate-50/20">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 md:p-8 space-y-4 md:space-y-8 bg-slate-50/20">
         {messages.map((m, idx) => (
           <div key={idx} className="space-y-3">
             <div className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in duration-300`}>
-              <div className={`max-w-[85%] rounded-[1.5rem] px-6 py-5 ${m.role === 'user'
+              <div className={`max-w-[90%] md:max-w-[85%] rounded-[1.5rem] px-4 md:px-6 py-4 md:py-5 ${m.role === 'user'
                 ? 'bg-blue-600 text-white rounded-tr-none shadow-xl shadow-blue-50/50'
                 : 'bg-white text-slate-800 shadow-sm border border-slate-100 rounded-tl-none'
                 }`}>
@@ -595,81 +810,92 @@ const ChatInterface: React.FC<{
         </div>
       )}
 
-      <div className="p-6 bg-white border-t space-y-5 shadow-inner relative z-20">
+      <div className="p-2 md:p-6 bg-white border-t space-y-2 md:space-y-5 shadow-inner relative z-20">
         {attachments.length > 0 && (
-          <div className="flex flex-wrap gap-4 mb-2 p-1 border-b border-slate-50 pb-4">
+          <div className="flex flex-wrap gap-2 md:gap-4 mb-1 md:mb-2 p-1 border-b border-slate-50 pb-2 md:pb-4">
             {attachments.map((at, i) => (
               <div key={i} className="relative group animate-in zoom-in-50 duration-200">
                 {at.mimeType.startsWith('image/') ? (
-                  <img src={`data:${at.mimeType};base64,${at.data}`} className="w-20 h-20 object-cover rounded-2xl border-2 border-blue-100 shadow-md" />
+                  <img src={`data:${at.mimeType};base64,${at.data}`} className="w-14 h-14 md:w-20 md:h-20 object-cover rounded-xl md:rounded-2xl border-2 border-blue-100 shadow-md" />
                 ) : (
-                  <div className="w-20 h-20 bg-blue-50 flex flex-col items-center justify-center rounded-2xl border-2 border-blue-100 text-[8px] font-black text-center p-2 text-blue-600 uppercase tracking-tighter">
-                    <svg className="w-6 h-6 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeWidth="2.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                    {at.name}
+                  <div className="w-14 h-14 md:w-20 md:h-20 bg-blue-50 flex flex-col items-center justify-center rounded-xl md:rounded-2xl border-2 border-blue-100 text-[7px] md:text-[8px] font-black text-center p-1 md:p-2 text-blue-600 uppercase tracking-tighter">
+                    <svg className="w-4 h-4 md:w-6 md:h-6 mb-0.5 md:mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeWidth="2.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                    <span className="truncate max-w-[48px] md:max-w-full">{at.name}</span>
                   </div>
                 )}
                 <button
                   onClick={() => setAttachments(prev => prev.filter((_, idx) => idx !== i))}
-                  className="absolute -top-3 -right-3 bg-red-500 text-white rounded-full w-6 h-6 text-[10px] flex items-center justify-center shadow-xl border-2 border-white transition-transform hover:scale-110"
+                  className="absolute -top-2 -right-2 md:-top-3 md:-right-3 bg-red-500 text-white rounded-full w-5 h-5 md:w-6 md:h-6 text-[9px] md:text-[10px] flex items-center justify-center shadow-xl border-2 border-white transition-transform hover:scale-110"
                 >✕</button>
               </div>
             ))}
           </div>
         )}
 
-        <form onSubmit={handleSend} className="flex gap-3">
-          <button
-            type="button"
-            onClick={startCamera}
-            className="p-4 bg-slate-50 rounded-[1.25rem] text-slate-400 hover:bg-blue-50 hover:text-blue-600 transition-all border border-slate-50"
-            title="Camera Analysis"
-          >
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeWidth="2.5" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" /><path strokeWidth="2.5" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-          </button>
+        <form onSubmit={handleSend} className="flex flex-col md:flex-row gap-2 md:gap-3">
+          {/* Mobile: Input row first for prominence */}
+          <div className="flex gap-2 md:contents order-2 md:order-none">
+            <input
+              type="text"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder={isListening ? "Listening..." : attachments.length ? "Files attached..." : "Describe your symptoms..."}
+              className="flex-1 min-w-0 px-4 py-3 md:py-4 rounded-xl md:rounded-[1.25rem] border border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none transition-all text-sm font-medium bg-white"
+              disabled={isProcessing || isUploading}
+            />
+            <button
+              type="submit"
+              disabled={(!input.trim() && attachments.length === 0) || isProcessing || isUploading}
+              className="bg-blue-600 text-white px-5 md:px-10 py-3 md:py-4 rounded-xl md:rounded-[1.25rem] hover:bg-blue-700 transition-all disabled:opacity-50 font-bold md:font-black uppercase tracking-wider md:tracking-widest text-xs md:text-[10px] shadow-lg active:scale-95 whitespace-nowrap"
+            >
+              Send
+            </button>
+          </div>
+          
+          {/* Mobile: Action buttons row - compact */}
+          <div className="flex gap-1.5 md:gap-2 order-1 md:order-none md:contents">
+            <button
+              type="button"
+              onClick={startCamera}
+              className="p-2.5 md:p-4 bg-slate-100 md:bg-slate-50 rounded-xl md:rounded-[1.25rem] text-slate-500 hover:bg-blue-50 hover:text-blue-600 transition-all border border-slate-200 md:border-slate-50"
+              title="Camera Analysis"
+            >
+              <svg className="w-5 h-5 md:w-6 md:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeWidth="2.5" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" /><path strokeWidth="2.5" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+            </button>
 
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            className="p-4 bg-slate-50 rounded-[1.25rem] text-slate-400 hover:bg-green-50 hover:text-green-600 transition-all border border-slate-50"
-            title="Upload Documents (PDF, Word, Images)"
-            disabled={isProcessing}
-          >
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeWidth="2.5" d="M12 4v16m8-8H4" /></svg>
-          </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            accept=".pdf,.docx,.doc,.jpg,.jpeg,.png,.gif,.bmp,.tiff"
-            onChange={handleFileUpload}
-            className="hidden"
-          />
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="p-2.5 md:p-4 bg-slate-100 md:bg-slate-50 rounded-xl md:rounded-[1.25rem] text-slate-500 hover:bg-green-50 hover:text-green-600 transition-all border border-slate-200 md:border-slate-50"
+              title="Upload Documents"
+              disabled={isProcessing || isUploading}
+            >
+              <svg className="w-5 h-5 md:w-6 md:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeWidth="2.5" d="M12 4v16m8-8H4" /></svg>
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept=".pdf,.docx,.doc,.jpg,.jpeg,.png,.gif,.bmp,.tiff,.tif,.webp,.heic,.heif,.ppt,.pptx,.xls,.xlsx,.csv,.txt,.md,.rtf,.xml,.html,.htm,.json,.log"
+              onChange={handleFileUpload}
+              className="hidden"
+            />
 
-          <button
-            type="button"
-            onClick={startListening}
-            disabled={isProcessing}
-            className={`p-4 rounded-[1.25rem] transition-all border ${isListening ? 'bg-red-100 text-red-600 border-red-200 animate-pulse' : 'bg-slate-50 text-slate-400 hover:bg-purple-50 hover:text-purple-600 border-slate-50'}`}
-            title={isListening ? "Listening..." : "Voice Input"}
-          >
-            <svg className="w-6 h-6" fill={isListening ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24"><path strokeWidth="2.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4" /></svg>
-          </button>
-
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder={isListening ? "Listening..." : attachments.length ? "Files attached..." : "Type message or use voice..."}
-            className="flex-1 px-6 py-4 rounded-[1.25rem] border border-slate-100 focus:ring-2 focus:ring-blue-500 outline-none transition-all text-sm font-medium shadow-inner bg-slate-50"
-            disabled={isProcessing}
-          />
-          <button
-            type="submit"
-            disabled={(!input.trim() && attachments.length === 0) || isProcessing}
-            className="bg-blue-600 text-white px-10 rounded-[1.25rem] hover:bg-blue-700 transition-all disabled:opacity-50 font-black uppercase tracking-widest text-[10px] shadow-xl active:scale-95"
-          >
-            Send
-          </button>
+            <button
+              type="button"
+              onClick={startListening}
+              disabled={isProcessing}
+              className={`p-2.5 md:p-4 rounded-xl md:rounded-[1.25rem] transition-all border ${isListening ? 'bg-red-100 text-red-600 border-red-200 animate-pulse' : 'bg-slate-100 md:bg-slate-50 text-slate-500 hover:bg-purple-50 hover:text-purple-600 border-slate-200 md:border-slate-50'}`}
+              title={isListening ? "Listening..." : "Voice Input"}
+            >
+              <svg className="w-5 h-5 md:w-6 md:h-6" fill={isListening ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24"><path strokeWidth="2.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4" /></svg>
+            </button>
+            
+            {/* Spacer text on mobile to show what buttons do */}
+            <span className="md:hidden flex-1 flex items-center text-[10px] text-slate-400 font-medium pl-1">
+              {isListening ? "🎤 Listening..." : isUploading ? "📎 Uploading..." : ""}
+            </span>
+          </div>
         </form>
 
         {micError && (
@@ -678,9 +904,14 @@ const ChatInterface: React.FC<{
           </div>
         )}
 
-        {isProcessing && (
+        {isUploading && (
+          <div className="px-6 py-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-700 text-sm font-medium flex items-center gap-2">
+            <div className="animate-spin">⟳</div> {uploadStatus || 'Processing documents...'}
+          </div>
+        )}
+        {isProcessing && !isUploading && (
           <div className="px-6 py-3 bg-blue-50 border border-blue-200 rounded-xl text-blue-700 text-sm font-medium flex items-center gap-2">
-            <div className="animate-spin">⟳</div> Processing documents with OCR...
+            <div className="animate-spin">⟳</div> Doctor is analyzing...
           </div>
         )}
       </div>
@@ -806,7 +1037,7 @@ const HistoryView: React.FC<{
       </div>
 
       <div className="space-y-4 mb-8">
-        <div className="flex gap-3">
+        <div className="flex flex-col md:flex-row gap-3">
           <input
             type="text"
             placeholder="Search by patient name, diagnosis, or summary..."
@@ -826,7 +1057,7 @@ const HistoryView: React.FC<{
         </div>
 
         {showAdvanced && (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-6 bg-blue-50 rounded-2xl border border-blue-200">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 p-4 md:p-6 bg-blue-50 rounded-2xl border border-blue-200">
             <div>
               <label className="block text-[10px] font-black text-slate-600 uppercase mb-2">Search Type</label>
               <select
@@ -922,23 +1153,23 @@ const HistoryView: React.FC<{
 
 const ReportView: React.FC<{ report: MedicalReport; patient: PatientInfo; onReset: () => void; }> = ({ report, patient, onReset }) => {
   return (
-    <div className="max-w-4xl mx-auto space-y-10 pb-40 animate-in fade-in zoom-in-95 duration-700">
-      <div className="bg-white rounded-[4rem] shadow-2xl overflow-hidden border border-slate-100">
-        <div className="bg-slate-950 text-white p-16 border-b-[12px] border-blue-600 relative overflow-hidden">
-          <div className="relative z-10 flex justify-between items-start">
+    <div className="max-w-4xl mx-auto space-y-6 md:space-y-10 pb-20 md:pb-40 animate-in fade-in zoom-in-95 duration-700">
+      <div className="bg-white rounded-3xl md:rounded-[4rem] shadow-2xl overflow-hidden border border-slate-100">
+        <div className="bg-slate-950 text-white p-8 md:p-16 border-b-4 md:border-b-[12px] border-blue-600 relative overflow-hidden">
+          <div className="relative z-10 flex flex-col md:flex-row justify-between items-start gap-4 md:gap-0">
             <div>
-              <h1 className="text-6xl font-black tracking-tighter uppercase leading-[0.85]">Clinical<br />Assessment</h1>
-              <p className="text-blue-400 font-black tracking-[0.5em] uppercase text-[9px] mt-6">Secure Diagnostic Record • India Official</p>
+              <h1 className="text-4xl md:text-6xl font-black tracking-tighter uppercase leading-[0.85]">Clinical<br />Assessment</h1>
+              <p className="text-blue-400 font-black tracking-[0.3em] md:tracking-[0.5em] uppercase text-[8px] md:text-[9px] mt-4 md:mt-6">Secure Diagnostic Record • India Official</p>
             </div>
-            <div className="bg-white/5 p-4 rounded-2xl border border-white/10 backdrop-blur-xl text-right">
+            <div className="bg-white/5 p-3 md:p-4 rounded-2xl border border-white/10 backdrop-blur-xl text-right">
               <p className="text-[8px] text-blue-300 font-black uppercase tracking-widest mb-1">Doc Ref</p>
-              <p className="text-sm font-mono font-black uppercase tracking-widest">#{Math.random().toString(36).substr(2, 6).toUpperCase()}</p>
+              <p className="text-xs md:text-sm font-mono font-black uppercase tracking-widest">#{Math.random().toString(36).substr(2, 6).toUpperCase()}</p>
             </div>
           </div>
         </div>
 
-        <div className="p-16 space-y-16">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-12 border-b border-slate-50 pb-12">
+        <div className="p-6 md:p-16 space-y-8 md:space-y-16">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6 md:gap-12 border-b border-slate-50 pb-6 md:pb-12">
             <div>
               <p className="text-[9px] text-slate-300 font-black uppercase tracking-[0.3em] mb-3">Patient Profile</p>
               <p className="text-2xl font-black text-slate-900 tracking-tighter uppercase">{patient.name}</p>
@@ -953,25 +1184,25 @@ const ReportView: React.FC<{ report: MedicalReport; patient: PatientInfo; onRese
             </div>
           </div>
 
-          <section className="bg-slate-50/50 p-12 rounded-[3.5rem] border border-slate-100 shadow-inner">
-            <h3 className="text-[9px] font-black text-slate-300 mb-6 uppercase tracking-[0.4em]">Primary Clinical Diagnosis</h3>
-            <p className="text-5xl text-blue-900 font-black tracking-tighter leading-[1.1] mb-8 uppercase">{report.diagnosis}</p>
-            <p className="text-xl text-slate-600 leading-relaxed font-black italic border-l-[6px] border-blue-100 pl-10 tracking-tight">"{report.patientSummary}"</p>
+          <section className="bg-slate-50/50 p-6 md:p-12 rounded-2xl md:rounded-[3.5rem] border border-slate-100 shadow-inner">
+            <h3 className="text-[9px] font-black text-slate-300 mb-4 md:mb-6 uppercase tracking-[0.4em]">Primary Clinical Diagnosis</h3>
+            <p className="text-3xl md:text-5xl text-blue-900 font-black tracking-tighter leading-[1.1] mb-4 md:mb-8 uppercase">{report.diagnosis}</p>
+            <p className="text-base md:text-xl text-slate-600 leading-relaxed font-black italic border-l-4 md:border-l-[6px] border-blue-100 pl-4 md:pl-10 tracking-tight">"{report.patientSummary}"</p>
           </section>
 
           <section>
-            <div className="flex items-center gap-6 mb-10">
+            <div className="flex items-center gap-4 md:gap-6 mb-6 md:mb-10">
               <h3 className="text-[9px] font-black text-slate-300 uppercase tracking-[0.4em]">Therapeutic Intervention Plan</h3>
               <div className="h-px bg-slate-100 flex-1"></div>
             </div>
-            <div className="grid grid-cols-1 gap-8">
+            <div className="grid grid-cols-1 gap-4 md:gap-8">
               {report.prescriptions.map((p, i) => (
-                <div key={i} className="p-10 border border-slate-100 rounded-[3rem] bg-white shadow-sm border-l-[12px] border-l-blue-600 hover:shadow-xl transition-all">
+                <div key={i} className="p-6 md:p-10 border border-slate-100 rounded-2xl md:rounded-[3rem] bg-white shadow-sm border-l-4 md:border-l-[12px] border-l-blue-600 hover:shadow-xl transition-all">
                   <div className="flex justify-between items-start mb-8">
                     <p className="font-black text-slate-900 text-3xl uppercase tracking-tighter">{p.medication}</p>
                     <span className="bg-slate-950 text-white text-[10px] px-6 py-2 rounded-full font-black uppercase tracking-widest">{p.duration}</span>
                   </div>
-                  <div className="grid grid-cols-2 gap-10">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 md:gap-10">
                     <div className="bg-slate-50/50 p-6 rounded-2xl border border-slate-50">
                       <p className="text-slate-300 text-[9px] font-black uppercase mb-2">Clinical Dosage</p>
                       <p className="font-black text-slate-800 text-xl tracking-tight">{p.dosage}</p>
@@ -1015,7 +1246,7 @@ const ReportView: React.FC<{ report: MedicalReport; patient: PatientInfo; onRese
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 relative z-10">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 relative z-10">
                   {report.recommendedTests.map((test, i) => (
                     <div key={i} className="bg-white/80 backdrop-blur-sm p-5 rounded-2xl border-2 border-purple-200/50 hover:border-purple-400 hover:shadow-md transition-all group">
                       <div className="flex items-center gap-3">
@@ -1043,16 +1274,16 @@ const ReportView: React.FC<{ report: MedicalReport; patient: PatientInfo; onRese
             </section>
           )}
 
-          <section className="grid grid-cols-1 md:grid-cols-2 gap-12">
-            <div className="bg-red-50 p-10 rounded-[3rem] border border-red-100 shadow-sm">
-              <h4 className="text-[9px] font-black text-red-600 uppercase mb-6 tracking-[0.3em] flex items-center gap-3">
+          <section className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-12">
+            <div className="bg-red-50 p-6 md:p-10 rounded-2xl md:rounded-[3rem] border border-red-100 shadow-sm">
+              <h4 className="text-[9px] font-black text-red-600 uppercase mb-4 md:mb-6 tracking-[0.3em] flex items-center gap-3">
                 <div className="w-2 h-2 bg-red-600 rounded-full animate-ping"></div>
                 Urgent Warnings
               </h4>
               <p className="text-sm text-red-950 leading-relaxed font-black uppercase tracking-tight">{report.emergencyWarning}</p>
             </div>
-            <div className="bg-blue-50 p-10 rounded-[3rem] border border-blue-100 shadow-sm">
-              <h4 className="text-[9px] font-black text-blue-700 uppercase mb-6 tracking-[0.3em] flex items-center gap-3">
+            <div className="bg-blue-50 p-6 md:p-10 rounded-2xl md:rounded-[3rem] border border-blue-100 shadow-sm">
+              <h4 className="text-[9px] font-black text-blue-700 uppercase mb-4 md:mb-6 tracking-[0.3em] flex items-center gap-3">
                 <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeWidth="3" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                 Next Clinical Steps
               </h4>
@@ -1062,7 +1293,7 @@ const ReportView: React.FC<{ report: MedicalReport; patient: PatientInfo; onRese
         </div>
       </div>
 
-      <div className="flex justify-center gap-8 no-print pb-20">
+      <div className="flex flex-col md:flex-row justify-center gap-4 md:gap-8 no-print pb-10 md:pb-20">
         <button onClick={() => window.print()} className="bg-slate-950 text-white px-16 py-6 rounded-[2rem] font-black uppercase tracking-[0.3em] text-[10px] shadow-2xl active:scale-95 transition-all flex items-center gap-4">
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeWidth="3" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" /></svg>
           Download Assessment
@@ -1204,7 +1435,7 @@ export default function App() {
       <div className="fixed top-0 left-0 w-96 h-96 bg-gradient-to-br from-blue-200/20 to-cyan-200/20 rounded-full blur-3xl animate-pulse -z-10"></div>
       <div className="fixed bottom-0 right-0 w-96 h-96 bg-gradient-to-tl from-violet-200/20 to-blue-200/20 rounded-full blur-3xl animate-pulse delay-1000 -z-10"></div>
 
-      <nav className="no-print bg-white/80 border-b-2 border-slate-200/50 px-8 py-5 flex items-center justify-between sticky top-0 z-50 backdrop-blur-xl shadow-lg relative">
+      <nav className="no-print bg-white/80 border-b-2 border-slate-200/50 px-4 md:px-8 py-4 md:py-5 flex items-center justify-between sticky top-0 z-50 backdrop-blur-xl shadow-lg relative">
         {/* Gradient accent bar */}
         <div className="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-blue-600 via-cyan-500 to-blue-600 opacity-80"></div>
 
@@ -1216,14 +1447,14 @@ export default function App() {
             </svg>
           </button>
           <div>
-            <span className="text-3xl font-black tracking-tighter cursor-pointer bg-gradient-to-r from-slate-800 via-blue-700 to-cyan-600 bg-clip-text text-transparent hover:from-blue-700 hover:via-cyan-600 hover:to-blue-700 transition-all" onClick={reset}>
+            <span className="text-xl md:text-3xl font-black tracking-tighter cursor-pointer bg-gradient-to-r from-slate-800 via-blue-700 to-cyan-600 bg-clip-text text-transparent hover:from-blue-700 hover:via-cyan-600 hover:to-blue-700 transition-all" onClick={reset}>
               VitalGuard <span className="text-cyan-600">Health</span>
             </span>
-            <p className="text-[9px] text-slate-500 font-black uppercase tracking-[0.2em] mt-0.5">AI-Powered Medical Intelligence</p>
+            <p className="text-[8px] md:text-[9px] text-slate-500 font-black uppercase tracking-[0.15em] md:tracking-[0.2em] mt-0.5 hidden sm:block">AI-Powered Medical Intelligence</p>
           </div>
         </div>
 
-        <div className="flex items-center gap-6">
+        <div className="flex items-center gap-2 md:gap-6">
           <LanguageSwitcher current={language} onChange={setLanguage} />
           <button
             onClick={() => setStep(AppStep.HISTORY)}
@@ -1241,7 +1472,7 @@ export default function App() {
         </div>
       </nav>
 
-      <main className="container mx-auto px-6 py-12 max-w-7xl">
+      <main className="container mx-auto px-4 md:px-6 py-6 md:py-12 max-w-7xl">
         {step === AppStep.VITALS && (
           <VitalsForm
             onComplete={startConsultation}
@@ -1252,8 +1483,8 @@ export default function App() {
         )}
 
         {step === AppStep.CONSULTATION && (
-          <div className="max-w-4xl mx-auto space-y-8">
-            <div className="bg-gradient-to-r from-blue-600 to-cyan-600 p-6 rounded-[2.5rem] text-white flex items-start gap-5 shadow-2xl shadow-blue-200/50 border-2 border-blue-400/30 relative overflow-hidden">
+          <div className="max-w-4xl mx-auto space-y-4 md:space-y-8">
+            <div className="bg-gradient-to-r from-blue-600 to-cyan-600 p-4 md:p-6 rounded-2xl md:rounded-[2.5rem] text-white flex items-start gap-3 md:gap-5 shadow-2xl shadow-blue-200/50 border-2 border-blue-400/30 relative overflow-hidden">
               {/* Accent decoration */}
               <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full blur-2xl"></div>
               <div className="absolute bottom-0 left-0 w-24 h-24 bg-cyan-400/20 rounded-full blur-xl"></div>
