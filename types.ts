@@ -15,6 +15,7 @@ export interface Attachment {
   data: string; // base64
   mimeType: string;
   name: string;
+  extractedText?: string; // Hidden text content extracted from documents for AI context
 }
 
 export interface QuestionOption {

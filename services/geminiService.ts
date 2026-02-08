@@ -55,11 +55,24 @@ export const getMedicalReport = async (
     ? `Patient Clinical History:\n${pastRecords.map(r => `Date: ${r.date}, Diagnosis: ${r.report?.diagnosis}`).join('\n')}\n\n`
     : "";
 
+  // Build consultation log with extracted document content
+  const consultationLog = history.map(m => {
+    let msgContent = `${m.role.toUpperCase()}: ${m.text}`;
+    // Include extracted text from documents
+    const extractedTexts = m.attachments
+      ?.filter(at => at.extractedText)
+      .map(at => `[Content from ${at.name}]:\n${at.extractedText}`) || [];
+    if (extractedTexts.length > 0) {
+      msgContent += '\n--- ATTACHED DOCUMENT CONTENT ---\n' + extractedTexts.join('\n\n');
+    }
+    return msgContent;
+  }).join('\n');
+
   const prompt = `${contextPrompt}Based on the following patient data and full consultation history, generate a comprehensive Indian clinical report.
   
   Patient: ${patient.name} (${patient.age}/${patient.gender})
   Consultation Log:
-  ${history.map(m => `${m.role.toUpperCase()}: ${m.text}`).join('\n')}
+  ${consultationLog}
   
   IMPORTANT: Include:
   1. A definitive diagnosis (or differential diagnosis)
@@ -139,15 +152,29 @@ export const getChatResponse = async (
     'text/plain', 'text/csv', 'text/html',
   ]);
 
-  const contents = history.map(msg => ({
-    role: msg.role === 'user' ? 'user' : 'model',
-    parts: [
-      { text: msg.text || "Clinical media provided." },
-      ...(msg.attachments?.filter(at => at.data && GEMINI_INLINE_TYPES.has(at.mimeType)).map(at => ({
-        inlineData: { data: at.data, mimeType: at.mimeType }
-      })) || [])
-    ]
-  }));
+  const contents = history.map(msg => {
+    // Build the text content, including any extracted document text
+    let textContent = msg.text || "Clinical media provided.";
+    
+    // Append extracted text from documents as hidden context for AI
+    const extractedTexts = msg.attachments
+      ?.filter(at => at.extractedText)
+      .map(at => `[Content from ${at.name}]:\n${at.extractedText}`) || [];
+    
+    if (extractedTexts.length > 0) {
+      textContent = textContent + '\n\n--- DOCUMENT CONTENT FOR ANALYSIS ---\n' + extractedTexts.join('\n\n');
+    }
+    
+    return {
+      role: msg.role === 'user' ? 'user' : 'model',
+      parts: [
+        { text: textContent },
+        ...(msg.attachments?.filter(at => at.data && GEMINI_INLINE_TYPES.has(at.mimeType)).map(at => ({
+          inlineData: { data: at.data, mimeType: at.mimeType }
+        })) || [])
+      ]
+    };
+  });
 
   try {
     const response = await ai.models.generateContent({
