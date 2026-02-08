@@ -133,11 +133,17 @@ export const getChatResponse = async (
     ? `Continuing care for ${patient.name}. History: ${pastRecords.map(r => r.report?.diagnosis).join(', ')}.`
     : `First session for ${patient.name}.`;
 
+  const GEMINI_INLINE_TYPES = new Set([
+    'image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/heic', 'image/heif', 'image/gif', 'image/bmp', 'image/tiff',
+    'application/pdf',
+    'text/plain', 'text/csv', 'text/html',
+  ]);
+
   const contents = history.map(msg => ({
     role: msg.role === 'user' ? 'user' : 'model',
     parts: [
       { text: msg.text || "Clinical media provided." },
-      ...(msg.attachments?.map(at => ({
+      ...(msg.attachments?.filter(at => at.data && GEMINI_INLINE_TYPES.has(at.mimeType)).map(at => ({
         inlineData: { data: at.data, mimeType: at.mimeType }
       })) || [])
     ]

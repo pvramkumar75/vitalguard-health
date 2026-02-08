@@ -4,6 +4,10 @@ import { AppStep, PatientInfo, Message, MedicalReport, ClinicalRecord, Attachmen
 import { getChatResponse, getMedicalReport } from './services/geminiService';
 import * as db from './db';
 import Tesseract from 'tesseract.js';
+import * as pdfjsLib from 'pdfjs-dist';
+
+// Configure PDF.js worker
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
 // --- Utilities ---
 const blobToBase64 = (blob: Blob): Promise<string> => {
@@ -16,6 +20,223 @@ const blobToBase64 = (blob: Blob): Promise<string> => {
     reader.onerror = reject;
     reader.readAsDataURL(blob);
   });
+};
+
+// MIME types that Gemini supports for inlineData
+const GEMINI_SUPPORTED_INLINE_TYPES = new Set([
+  'image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/heic', 'image/heif', 'image/gif', 'image/bmp', 'image/tiff',
+  'application/pdf',
+  'text/plain', 'text/csv', 'text/html',
+]);
+
+// --- Document Text Extraction Utilities ---
+
+const extractPdfText = async (file: File): Promise<string> => {
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
+    let fullText = '';
+
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const textContent = await page.getTextContent();
+      const pageText = (textContent.items as any[]).map((item: any) => item.str).join(' ');
+      if (pageText.trim()) fullText += `[Page ${i}] ${pageText}\n`;
+    }
+
+    if (fullText.trim()) return fullText.trim();
+
+    // Fallback: render scanned PDF pages to images and OCR them
+    const ocrTexts: string[] = [];
+    for (let i = 1; i <= Math.min(pdf.numPages, 10); i++) {
+      const page = await pdf.getPage(i);
+      const viewport = page.getViewport({ scale: 2.0 });
+      const canvas = document.createElement('canvas');
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      const ctx = canvas.getContext('2d')!;
+      await page.render({ canvasContext: ctx, viewport }).promise;
+
+      const blob = await new Promise<Blob>((resolve) =>
+        canvas.toBlob((b) => resolve(b!), 'image/png')
+      );
+      const { data: { text } } = await Tesseract.recognize(blob, 'eng');
+      if (text.trim()) ocrTexts.push(`[Page ${i}] ${text.trim()}`);
+    }
+
+    return ocrTexts.join('\n\n');
+  } catch (err) {
+    console.error('PDF extraction failed:', err);
+    return '';
+  }
+};
+
+const extractDocxText = async (file: File): Promise<string> => {
+  try {
+    const mammoth = await import('mammoth');
+    const arrayBuffer = await file.arrayBuffer();
+    const result = await mammoth.extractRawText({ arrayBuffer });
+    return result.value;
+  } catch (err) {
+    console.error('DOCX extraction failed:', err);
+    return '';
+  }
+};
+
+const extractPptxText = async (file: File): Promise<string> => {
+  try {
+    const JSZip = (await import('jszip')).default;
+    const arrayBuffer = await file.arrayBuffer();
+    const zip = await JSZip.loadAsync(arrayBuffer);
+
+    const texts: string[] = [];
+    const slideFiles = Object.keys(zip.files)
+      .filter((name) => /ppt\/slides\/slide\d+\.xml/.test(name))
+      .sort((a, b) => {
+        const numA = parseInt(a.match(/slide(\d+)/)?.[1] || '0');
+        const numB = parseInt(b.match(/slide(\d+)/)?.[1] || '0');
+        return numA - numB;
+      });
+
+    for (const slidePath of slideFiles) {
+      const content = await zip.file(slidePath)?.async('text');
+      if (content) {
+        const textElements = content.match(/<a:t>([^<]*)<\/a:t>/g) || [];
+        const slideText = textElements.map((t) => t.replace(/<[^>]+>/g, '')).join(' ');
+        if (slideText.trim()) {
+          const slideNum = slidePath.match(/slide(\d+)/)?.[1];
+          texts.push(`[Slide ${slideNum}] ${slideText.trim()}`);
+        }
+      }
+    }
+
+    return texts.join('\n');
+  } catch (err) {
+    console.error('PPTX extraction failed:', err);
+    return '';
+  }
+};
+
+const extractXlsxText = async (file: File): Promise<string> => {
+  try {
+    const JSZip = (await import('jszip')).default;
+    const arrayBuffer = await file.arrayBuffer();
+    const zip = await JSZip.loadAsync(arrayBuffer);
+
+    // Get shared strings
+    const sharedStringsFile = zip.file('xl/sharedStrings.xml');
+    let sharedStrings: string[] = [];
+    if (sharedStringsFile) {
+      const content = await sharedStringsFile.async('text');
+      const matches = content.match(/<t[^>]*>([^<]+)<\/t>/g) || [];
+      sharedStrings = matches.map((m) => m.replace(/<[^>]+>/g, ''));
+    }
+
+    const sheetFiles = Object.keys(zip.files)
+      .filter((name) => /xl\/worksheets\/sheet\d+\.xml/.test(name))
+      .sort();
+
+    const rows: string[] = [];
+    for (const sheetPath of sheetFiles) {
+      const content = await zip.file(sheetPath)?.async('text');
+      if (content) {
+        const rowMatches = content.match(/<row[^>]*>[\s\S]*?<\/row>/g) || [];
+        for (const row of rowMatches) {
+          const cellValues = row.match(/<v>([^<]+)<\/v>/g) || [];
+          const values = cellValues.map((c) => {
+            const val = c.replace(/<[^>]+>/g, '');
+            const idx = parseInt(val);
+            return !isNaN(idx) && sharedStrings[idx] ? sharedStrings[idx] : val;
+          });
+          if (values.length) rows.push(values.join('\t'));
+        }
+      }
+    }
+
+    return rows.join('\n') || sharedStrings.join(' ');
+  } catch (err) {
+    console.error('XLSX extraction failed:', err);
+    return '';
+  }
+};
+
+const extractBinaryDocText = async (file: File): Promise<string> => {
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    const bytes = new Uint8Array(arrayBuffer);
+    const chunks: string[] = [];
+    let current = '';
+
+    for (let i = 0; i < bytes.length; i++) {
+      const byte = bytes[i];
+      if (byte >= 32 && byte <= 126) {
+        current += String.fromCharCode(byte);
+      } else if (byte === 10 || byte === 13) {
+        current += ' ';
+      } else {
+        if (current.trim().length > 3) {
+          chunks.push(current.trim());
+        }
+        current = '';
+      }
+    }
+    if (current.trim().length > 3) chunks.push(current.trim());
+
+    return chunks.join(' ').replace(/\s+/g, ' ').substring(0, 15000);
+  } catch (err) {
+    console.error('Binary text extraction failed:', err);
+    return '';
+  }
+};
+
+const extractDocumentText = async (file: File): Promise<string> => {
+  const ext = file.name.split('.').pop()?.toLowerCase() || '';
+
+  try {
+    // Plain text files
+    if (
+      ['txt', 'csv', 'md', 'json', 'xml', 'html', 'htm', 'log', 'rtf'].includes(ext) ||
+      file.type.startsWith('text/')
+    ) {
+      return await file.text();
+    }
+
+    // Images - Tesseract OCR
+    if (file.type.startsWith('image/')) {
+      const { data: { text } } = await Tesseract.recognize(file, 'eng');
+      return text;
+    }
+
+    // PDF - text layer extraction with OCR fallback for scanned docs
+    if (ext === 'pdf' || file.type === 'application/pdf') {
+      return await extractPdfText(file);
+    }
+
+    // DOCX
+    if (ext === 'docx' || file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+      return await extractDocxText(file);
+    }
+
+    // PPTX
+    if (ext === 'pptx' || file.type === 'application/vnd.openxmlformats-officedocument.presentationml.presentation') {
+      return await extractPptxText(file);
+    }
+
+    // XLSX
+    if (ext === 'xlsx' || file.type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet') {
+      return await extractXlsxText(file);
+    }
+
+    // Old binary formats (doc, ppt, xls) - best effort text extraction
+    if (['doc', 'ppt', 'xls'].includes(ext)) {
+      return await extractBinaryDocText(file);
+    }
+
+    return '';
+  } catch (err) {
+    console.error(`Document extraction failed for ${file.name}:`, err);
+    return '';
+  }
 };
 
 // --- Sub-components ---
@@ -282,6 +503,8 @@ const ChatInterface: React.FC<{
   const [micError, setMicError] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [isCapturing, setIsCapturing] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadStatus, setUploadStatus] = useState<string>('');
   const [selectedCheckboxOptions, setSelectedCheckboxOptions] = useState<string[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -341,60 +564,53 @@ const ChatInterface: React.FC<{
     }
   };
 
-  const extractOCRText = async (file: File): Promise<string> => {
-    try {
-      if (file.type.startsWith('image/')) {
-        // For images, use Tesseract OCR
-        const { data: { text } } = await Tesseract.recognize(file, 'eng');
-        return text;
-      }
-      return '';
-    } catch (err) {
-      console.error('OCR error:', err);
-      return '';
-    }
-  };
-
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
-    setIsProcessing(true);
+    setIsUploading(true);
+    setUploadStatus('Reading files...');
     const newAttachments: Attachment[] = [];
     let extractedTexts: string[] = [];
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
+      const ext = file.name.split('.').pop()?.toLowerCase() || '';
+      setUploadStatus(`Processing ${file.name} (${i + 1}/${files.length})...`);
+
       const base64 = await blobToBase64(file);
+      const mimeType = file.type || 'application/octet-stream';
 
-      newAttachments.push({
-        data: base64,
-        mimeType: file.type || 'application/octet-stream',
-        name: file.name
-      });
+      // Only attach as inlineData if Gemini supports this MIME type
+      if (GEMINI_SUPPORTED_INLINE_TYPES.has(mimeType) || file.type.startsWith('image/')) {
+        newAttachments.push({ data: base64, mimeType, name: file.name });
+      } else {
+        // For unsupported types, attach a placeholder so the user sees it in the UI
+        newAttachments.push({ data: '', mimeType: 'text/plain', name: file.name });
+      }
 
-      // Extract text from documents
-      if (file.type.startsWith('image/')) {
-        try {
-          const ocrText = await extractOCRText(file);
-          if (ocrText.trim()) {
-            extractedTexts.push(`[${file.name}]: ${ocrText}`);
-          }
-        } catch (err) {
-          console.error(`OCR failed for ${file.name}:`, err);
+      // Extract text from ALL document types
+      try {
+        setUploadStatus(`Extracting text from ${file.name}...`);
+        const extractedText = await extractDocumentText(file);
+        if (extractedText.trim()) {
+          extractedTexts.push(`[Content from ${file.name}]:\n${extractedText.trim()}`);
         }
+      } catch (err) {
+        console.error(`Text extraction failed for ${file.name}:`, err);
       }
     }
 
     setAttachments(prev => [...prev, ...newAttachments]);
 
-    // Add extracted text to input if OCR found text
+    // Add all extracted text to the input field
     if (extractedTexts.length > 0) {
       const extractedMessage = `Document Analysis:\n${extractedTexts.join('\n\n')}`;
       setInput(prev => prev ? prev + '\n\n' + extractedMessage : extractedMessage);
     }
 
-    setIsProcessing(false);
+    setIsUploading(false);
+    setUploadStatus('');
     e.target.value = '';
   };
 
@@ -441,7 +657,7 @@ const ChatInterface: React.FC<{
 
   const handleSend = (e: React.FormEvent) => {
     e.preventDefault();
-    if ((!input.trim() && attachments.length === 0 && selectedCheckboxOptions.length === 0) || isProcessing) return;
+    if ((!input.trim() && attachments.length === 0 && selectedCheckboxOptions.length === 0) || isProcessing || isUploading) return;
 
     let messageToSend = input.trim();
     if (selectedCheckboxOptions.length > 0 && !messageToSend) {
@@ -631,8 +847,8 @@ const ChatInterface: React.FC<{
             type="button"
             onClick={() => fileInputRef.current?.click()}
             className="p-4 bg-slate-50 rounded-[1.25rem] text-slate-400 hover:bg-green-50 hover:text-green-600 transition-all border border-slate-50"
-            title="Upload Documents (PDF, Word, Images)"
-            disabled={isProcessing}
+            title="Upload Documents (PDF, Word, PPT, Excel, Images & more)"
+            disabled={isProcessing || isUploading}
           >
             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeWidth="2.5" d="M12 4v16m8-8H4" /></svg>
           </button>
@@ -640,7 +856,7 @@ const ChatInterface: React.FC<{
             ref={fileInputRef}
             type="file"
             multiple
-            accept=".pdf,.docx,.doc,.jpg,.jpeg,.png,.gif,.bmp,.tiff"
+            accept=".pdf,.docx,.doc,.jpg,.jpeg,.png,.gif,.bmp,.tiff,.tif,.webp,.heic,.heif,.ppt,.pptx,.xls,.xlsx,.csv,.txt,.md,.rtf,.xml,.html,.htm,.json,.log"
             onChange={handleFileUpload}
             className="hidden"
           />
@@ -661,11 +877,11 @@ const ChatInterface: React.FC<{
             onChange={(e) => setInput(e.target.value)}
             placeholder={isListening ? "Listening..." : attachments.length ? "Files attached..." : "Type message or use voice..."}
             className="flex-1 px-6 py-4 rounded-[1.25rem] border border-slate-100 focus:ring-2 focus:ring-blue-500 outline-none transition-all text-sm font-medium shadow-inner bg-slate-50"
-            disabled={isProcessing}
+            disabled={isProcessing || isUploading}
           />
           <button
             type="submit"
-            disabled={(!input.trim() && attachments.length === 0) || isProcessing}
+            disabled={(!input.trim() && attachments.length === 0) || isProcessing || isUploading}
             className="bg-blue-600 text-white px-10 rounded-[1.25rem] hover:bg-blue-700 transition-all disabled:opacity-50 font-black uppercase tracking-widest text-[10px] shadow-xl active:scale-95"
           >
             Send
@@ -678,9 +894,14 @@ const ChatInterface: React.FC<{
           </div>
         )}
 
-        {isProcessing && (
+        {isUploading && (
+          <div className="px-6 py-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-700 text-sm font-medium flex items-center gap-2">
+            <div className="animate-spin">⟳</div> {uploadStatus || 'Processing documents...'}
+          </div>
+        )}
+        {isProcessing && !isUploading && (
           <div className="px-6 py-3 bg-blue-50 border border-blue-200 rounded-xl text-blue-700 text-sm font-medium flex items-center gap-2">
-            <div className="animate-spin">⟳</div> Processing documents with OCR...
+            <div className="animate-spin">⟳</div> Doctor is analyzing...
           </div>
         )}
       </div>
