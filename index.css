@@ -244,10 +244,6 @@ button, a, input, select, textarea {
   }
 }
 
-/* =================================
-   LANDSCAPE MOBILE OPTIMIZATIONS
-   ================================= */
-
 @media (max-width: 768px) and (orientation: landscape) {
   /* Reduce vertical spacing in landscape mode */
   .mobile-landscape-compact {
@@ -255,3 +251,45 @@ button, a, input, select, textarea {
     padding-bottom: 0.5rem;
   }
 }
+
+/* =================================
+   MOBILE CHAT INPUT OPTIMIZATIONS
+   ================================= */
+
+/* Mobile input enhancements */
+@media (max-width: 640px) {
+  /* Ensure minimum tap target sizes on mobile */
+  form button {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  
+  /* Give text input good visual prominence */
+  form input[type="text"] {
+    min-height: 48px;
+    font-size: 16px; /* Prevents iOS zoom on focus */
+  }
+  
+  /* Compact status messages on mobile */
+  .px-6 {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+}
+
+/* Better mobile input focus states */
+@media (max-width: 768px) {
+  input:focus, textarea:focus {
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+  }
+}
+
+/* Prevent keyboard from pushing content too much on small screens */
+@supports (-webkit-touch-callout: none) {
+  /* iOS only */
+  .fixed, .sticky {
+    -webkit-transform: translateZ(0);
+    transform: translateZ(0);
+  }
+}
+

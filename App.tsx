@@ -810,81 +810,92 @@ const ChatInterface: React.FC<{
         </div>
       )}
 
-      <div className="p-3 md:p-6 bg-white border-t space-y-3 md:space-y-5 shadow-inner relative z-20">
+      <div className="p-2 md:p-6 bg-white border-t space-y-2 md:space-y-5 shadow-inner relative z-20">
         {attachments.length > 0 && (
-          <div className="flex flex-wrap gap-4 mb-2 p-1 border-b border-slate-50 pb-4">
+          <div className="flex flex-wrap gap-2 md:gap-4 mb-1 md:mb-2 p-1 border-b border-slate-50 pb-2 md:pb-4">
             {attachments.map((at, i) => (
               <div key={i} className="relative group animate-in zoom-in-50 duration-200">
                 {at.mimeType.startsWith('image/') ? (
-                  <img src={`data:${at.mimeType};base64,${at.data}`} className="w-20 h-20 object-cover rounded-2xl border-2 border-blue-100 shadow-md" />
+                  <img src={`data:${at.mimeType};base64,${at.data}`} className="w-14 h-14 md:w-20 md:h-20 object-cover rounded-xl md:rounded-2xl border-2 border-blue-100 shadow-md" />
                 ) : (
-                  <div className="w-20 h-20 bg-blue-50 flex flex-col items-center justify-center rounded-2xl border-2 border-blue-100 text-[8px] font-black text-center p-2 text-blue-600 uppercase tracking-tighter">
-                    <svg className="w-6 h-6 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeWidth="2.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                    {at.name}
+                  <div className="w-14 h-14 md:w-20 md:h-20 bg-blue-50 flex flex-col items-center justify-center rounded-xl md:rounded-2xl border-2 border-blue-100 text-[7px] md:text-[8px] font-black text-center p-1 md:p-2 text-blue-600 uppercase tracking-tighter">
+                    <svg className="w-4 h-4 md:w-6 md:h-6 mb-0.5 md:mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeWidth="2.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                    <span className="truncate max-w-[48px] md:max-w-full">{at.name}</span>
                   </div>
                 )}
                 <button
                   onClick={() => setAttachments(prev => prev.filter((_, idx) => idx !== i))}
-                  className="absolute -top-3 -right-3 bg-red-500 text-white rounded-full w-6 h-6 text-[10px] flex items-center justify-center shadow-xl border-2 border-white transition-transform hover:scale-110"
+                  className="absolute -top-2 -right-2 md:-top-3 md:-right-3 bg-red-500 text-white rounded-full w-5 h-5 md:w-6 md:h-6 text-[9px] md:text-[10px] flex items-center justify-center shadow-xl border-2 border-white transition-transform hover:scale-110"
                 >✕</button>
               </div>
             ))}
           </div>
         )}
 
-        <form onSubmit={handleSend} className="flex gap-2 md:gap-3 flex-wrap md:flex-nowrap">
-          <button
-            type="button"
-            onClick={startCamera}
-            className="p-4 bg-slate-50 rounded-[1.25rem] text-slate-400 hover:bg-blue-50 hover:text-blue-600 transition-all border border-slate-50"
-            title="Camera Analysis"
-          >
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeWidth="2.5" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" /><path strokeWidth="2.5" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-          </button>
+        <form onSubmit={handleSend} className="flex flex-col md:flex-row gap-2 md:gap-3">
+          {/* Mobile: Input row first for prominence */}
+          <div className="flex gap-2 md:contents order-2 md:order-none">
+            <input
+              type="text"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder={isListening ? "Listening..." : attachments.length ? "Files attached..." : "Describe your symptoms..."}
+              className="flex-1 min-w-0 px-4 py-3 md:py-4 rounded-xl md:rounded-[1.25rem] border border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none transition-all text-sm font-medium bg-white"
+              disabled={isProcessing || isUploading}
+            />
+            <button
+              type="submit"
+              disabled={(!input.trim() && attachments.length === 0) || isProcessing || isUploading}
+              className="bg-blue-600 text-white px-5 md:px-10 py-3 md:py-4 rounded-xl md:rounded-[1.25rem] hover:bg-blue-700 transition-all disabled:opacity-50 font-bold md:font-black uppercase tracking-wider md:tracking-widest text-xs md:text-[10px] shadow-lg active:scale-95 whitespace-nowrap"
+            >
+              Send
+            </button>
+          </div>
+          
+          {/* Mobile: Action buttons row - compact */}
+          <div className="flex gap-1.5 md:gap-2 order-1 md:order-none md:contents">
+            <button
+              type="button"
+              onClick={startCamera}
+              className="p-2.5 md:p-4 bg-slate-100 md:bg-slate-50 rounded-xl md:rounded-[1.25rem] text-slate-500 hover:bg-blue-50 hover:text-blue-600 transition-all border border-slate-200 md:border-slate-50"
+              title="Camera Analysis"
+            >
+              <svg className="w-5 h-5 md:w-6 md:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeWidth="2.5" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" /><path strokeWidth="2.5" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+            </button>
 
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            className="p-4 bg-slate-50 rounded-[1.25rem] text-slate-400 hover:bg-green-50 hover:text-green-600 transition-all border border-slate-50"
-            title="Upload Documents (PDF, Word, PPT, Excel, Images & more)"
-            disabled={isProcessing || isUploading}
-          >
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeWidth="2.5" d="M12 4v16m8-8H4" /></svg>
-          </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            accept=".pdf,.docx,.doc,.jpg,.jpeg,.png,.gif,.bmp,.tiff,.tif,.webp,.heic,.heif,.ppt,.pptx,.xls,.xlsx,.csv,.txt,.md,.rtf,.xml,.html,.htm,.json,.log"
-            onChange={handleFileUpload}
-            className="hidden"
-          />
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="p-2.5 md:p-4 bg-slate-100 md:bg-slate-50 rounded-xl md:rounded-[1.25rem] text-slate-500 hover:bg-green-50 hover:text-green-600 transition-all border border-slate-200 md:border-slate-50"
+              title="Upload Documents"
+              disabled={isProcessing || isUploading}
+            >
+              <svg className="w-5 h-5 md:w-6 md:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeWidth="2.5" d="M12 4v16m8-8H4" /></svg>
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept=".pdf,.docx,.doc,.jpg,.jpeg,.png,.gif,.bmp,.tiff,.tif,.webp,.heic,.heif,.ppt,.pptx,.xls,.xlsx,.csv,.txt,.md,.rtf,.xml,.html,.htm,.json,.log"
+              onChange={handleFileUpload}
+              className="hidden"
+            />
 
-          <button
-            type="button"
-            onClick={startListening}
-            disabled={isProcessing}
-            className={`p-4 rounded-[1.25rem] transition-all border ${isListening ? 'bg-red-100 text-red-600 border-red-200 animate-pulse' : 'bg-slate-50 text-slate-400 hover:bg-purple-50 hover:text-purple-600 border-slate-50'}`}
-            title={isListening ? "Listening..." : "Voice Input"}
-          >
-            <svg className="w-6 h-6" fill={isListening ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24"><path strokeWidth="2.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4" /></svg>
-          </button>
-
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder={isListening ? "Listening..." : attachments.length ? "Files attached..." : "Type message or use voice..."}
-            className="flex-1 w-full md:w-auto px-4 md:px-6 py-3 md:py-4 rounded-[1.25rem] border border-slate-100 focus:ring-2 focus:ring-blue-500 outline-none transition-all text-sm font-medium shadow-inner bg-slate-50"
-            disabled={isProcessing || isUploading}
-          />
-          <button
-            type="submit"
-            disabled={(!input.trim() && attachments.length === 0) || isProcessing || isUploading}
-            className="bg-blue-600 text-white px-10 rounded-[1.25rem] hover:bg-blue-700 transition-all disabled:opacity-50 font-black uppercase tracking-widest text-[10px] shadow-xl active:scale-95"
-          >
-            Send
-          </button>
+            <button
+              type="button"
+              onClick={startListening}
+              disabled={isProcessing}
+              className={`p-2.5 md:p-4 rounded-xl md:rounded-[1.25rem] transition-all border ${isListening ? 'bg-red-100 text-red-600 border-red-200 animate-pulse' : 'bg-slate-100 md:bg-slate-50 text-slate-500 hover:bg-purple-50 hover:text-purple-600 border-slate-200 md:border-slate-50'}`}
+              title={isListening ? "Listening..." : "Voice Input"}
+            >
+              <svg className="w-5 h-5 md:w-6 md:h-6" fill={isListening ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24"><path strokeWidth="2.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4" /></svg>
+            </button>
+            
+            {/* Spacer text on mobile to show what buttons do */}
+            <span className="md:hidden flex-1 flex items-center text-[10px] text-slate-400 font-medium pl-1">
+              {isListening ? "🎤 Listening..." : isUploading ? "📎 Uploading..." : ""}
+            </span>
+          </div>
         </form>
 
         {micError && (
