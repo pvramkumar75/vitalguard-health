@@ -34,6 +34,7 @@ export interface Message {
   text: string;
   attachments?: Attachment[];
   question?: StructuredQuestion;
+  timestamp?: string; // ISO timestamp for when message was sent
 }
 
 export interface ClinicalRecord {

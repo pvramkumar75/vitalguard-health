@@ -32,12 +32,21 @@ Clinical Protocol:
 - Once you reach the question limit or feel certain, inform the patient that you are ready to compile their "Comprehensive Clinical Summary".`;
 };
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+let aiInstance: GoogleGenAI | null = null;
 
-// Validate API key is set
-if (!process.env.API_KEY || process.env.API_KEY === 'PLACEHOLDER_API_KEY' || process.env.API_KEY === 'YOUR_ACTUAL_GEMINI_API_KEY_HERE') {
-  console.error('FATAL: GEMINI_API_KEY not configured. Please set GEMINI_API_KEY in .env.local with your actual API key from https://aistudio.google.com/app/apikey');
-}
+const getAIClient = () => {
+  if (aiInstance) return aiInstance;
+  
+  const apiKey = process.env.API_KEY || process.env.GEMINI_API_KEY;
+  
+  if (!apiKey || apiKey.includes('PLACEHOLDER') || apiKey.includes('YOUR_ACTUAL')) {
+    throw new Error('Gemini API key not configured. Please set GEMINI_API_KEY in your environment variables.');
+  }
+  
+  aiInstance = new GoogleGenAI({ apiKey });
+  return aiInstance;
+};
+
 
 export const getMedicalReport = async (
   patient: PatientInfo,
@@ -82,6 +91,7 @@ export const getMedicalReport = async (
   The output must be valid JSON matching the schema provided.`;
 
   try {
+    const ai = getAIClient();
     const response = await ai.models.generateContent({
       model: model,
       contents: prompt,
@@ -177,6 +187,7 @@ export const getChatResponse = async (
   });
 
   try {
+    const ai = getAIClient();
     const response = await ai.models.generateContent({
       model,
       contents,
