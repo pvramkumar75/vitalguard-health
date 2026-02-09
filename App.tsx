@@ -9,6 +9,15 @@ import * as pdfjsLib from 'pdfjs-dist';
 // Configure PDF.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
+import { 
+  Activity, AlertTriangle, ArrowLeft, ArrowRight, Calendar, Camera, Check, 
+  ChevronDown, ChevronRight, ClipboardCheck, Download, FileText, Filter, 
+  History, Languages, Loader2, MessageSquare, Mic, MicOff, Paperclip, 
+  Printer, RefreshCw, Search, Send, Trash2, Upload, User, X, Globe, Shield 
+} from 'lucide-react';
+import { Logo } from './src/components/Logo';
+import { GlobalBackground } from './src/components/Background';
+
 // --- Utilities ---
 const blobToBase64 = (blob: Blob): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -20,6 +29,21 @@ const blobToBase64 = (blob: Blob): Promise<string> => {
     reader.onerror = reject;
     reader.readAsDataURL(blob);
   });
+};
+
+// Format timestamp for display
+const formatTimestamp = (isoString?: string): string => {
+  if (!isoString) return '';
+  const date = new Date(isoString);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / 3600000);
+  
+  if (diffMins < 1) return 'Just now';
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  return date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 };
 
 // MIME types that Gemini supports for inlineData
@@ -301,28 +325,121 @@ const CheckboxQuestion: React.FC<{
 };
 
 const LanguageSwitcher: React.FC<{ current: Language; onChange: (l: Language) => void }> = ({ current, onChange }) => {
+  const [isOpen, setIsOpen] = useState(false);
   const langs: { id: Language; label: string; native: string }[] = [
     { id: 'en', label: 'English', native: 'English' },
     { id: 'hi', label: 'Hindi', native: 'हिन्दी' },
     { id: 'te', label: 'Telugu', native: 'తెలుగు' }
   ];
 
+  const currentLang = langs.find(l => l.id === current) || langs[0];
+
   return (
-    <div className="flex gap-1 md:gap-2 bg-gradient-to-r from-slate-100 to-slate-50 p-1 md:p-1.5 rounded-xl md:rounded-2xl border-2 border-slate-200 shadow-md no-print relative overflow-hidden">
-      <div className="absolute inset-0 bg-gradient-to-r from-blue-100/20 to-cyan-100/20 opacity-0 hover:opacity-100 transition-opacity pointer-events-none"></div>
-      {langs.map((l) => (
+    <div className="relative no-print z-50">
+      <div className="relative">
         <button
-          key={l.id}
-          onClick={() => onChange(l.id)}
-          className={`px-2 md:px-4 py-1.5 md:py-2 rounded-lg md:rounded-xl text-[8px] md:text-[10px] font-black uppercase tracking-wider md:tracking-widest transition-all relative z-10 group ${current === l.id
-            ? 'bg-gradient-to-r from-blue-600 to-cyan-600 text-white shadow-lg shadow-blue-300/50 scale-105'
-            : 'text-slate-500 hover:text-slate-700 hover:bg-white/80 hover:shadow-sm'
-            }`}
+          onClick={() => setIsOpen(!isOpen)}
+          className="flex items-center gap-2 px-4 py-2 bg-white/80 backdrop-blur-md border border-slate-200 rounded-xl shadow-sm hover:border-blue-300 hover:shadow-md transition-all group"
         >
-          <span className="block">{l.label}</span>
-          <span className="block text-[7px] md:text-[8px] opacity-70 font-medium hidden sm:block">{l.native}</span>
+          <Globe className="w-4 h-4 text-slate-500 group-hover:text-blue-600 transition-colors" />
+          <span className="text-sm font-semibold text-slate-700 group-hover:text-slate-900">{currentLang.label}</span>
+          <ChevronDown className={`w-3 h-3 text-slate-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
         </button>
-      ))}
+        
+        {isOpen && (
+          <div className="absolute right-0 mt-2 w-48 bg-white rounded-xl shadow-xl border border-slate-100 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
+            {langs.map((l) => (
+              <button
+                key={l.id}
+                onClick={() => { onChange(l.id); setIsOpen(false); }}
+                className={`w-full px-4 py-3 text-left text-sm font-medium flex items-center justify-between transition-colors ${
+                  current === l.id ? 'bg-blue-50 text-blue-700' : 'hover:bg-slate-50 text-slate-700'
+                }`}
+              >
+                <div className="flex flex-col">
+                  <span>{l.label}</span>
+                  <span className="text-xs text-slate-400 font-normal">{l.native}</span>
+                </div>
+                {current === l.id && <Check className="w-4 h-4 text-blue-600" />}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+const StepProgressIndicator: React.FC<{ currentStep: AppStep }> = ({ currentStep }) => {
+  const steps = [
+    { id: AppStep.VITALS, label: 'Patient Info', icon: User },
+    { id: AppStep.CONSULTATION, label: 'Consultation', icon: MessageSquare },
+    { id: AppStep.REPORT, label: 'Report', icon: FileText }
+  ];
+
+  const getStepStatus = (stepId: AppStep): 'completed' | 'current' | 'upcoming' => {
+    const stepOrder = [AppStep.VITALS, AppStep.CONSULTATION, AppStep.REPORT];
+    const currentIndex = stepOrder.indexOf(currentStep);
+    const stepIndex = stepOrder.indexOf(stepId);
+    
+    if (stepIndex < currentIndex) return 'completed';
+    if (stepIndex === currentIndex) return 'current';
+    return 'upcoming';
+  };
+
+  // Don't show on history view
+  if (currentStep === AppStep.HISTORY) return null;
+
+  return (
+    <div className="w-full max-w-2xl mx-auto mb-6 md:mb-8 px-4">
+      <div className="bg-white/80 backdrop-blur-sm rounded-2xl md:rounded-3xl p-4 md:p-6 shadow-lg border border-slate-100">
+        <div className="flex items-center justify-between relative">
+          {/* Progress line background */}
+          <div className="absolute top-1/2 left-0 right-0 h-1 bg-slate-100 -translate-y-1/2 mx-12 md:mx-16 rounded-full"></div>
+          
+          {/* Active progress line */}
+          <div 
+            className="absolute top-1/2 left-0 h-1 bg-gradient-to-r from-blue-600 to-cyan-600 -translate-y-1/2 rounded-full transition-all duration-500"
+            style={{ 
+              marginLeft: '3rem',
+              width: currentStep === AppStep.VITALS ? '0%' : 
+                     currentStep === AppStep.CONSULTATION ? 'calc(50% - 3rem)' : 
+                     'calc(100% - 6rem)'
+            }}
+          ></div>
+
+          {steps.map((step, index) => {
+            const status = getStepStatus(step.id);
+            const Icon = step.icon;
+            return (
+              <div key={step.id} className="flex flex-col items-center relative z-10">
+                <div className={`
+                  w-10 h-10 md:w-12 md:h-12 rounded-full flex items-center justify-center text-lg md:text-xl
+                  transition-all duration-300 border-2
+                  ${status === 'completed' 
+                    ? 'bg-gradient-to-br from-green-500 to-emerald-600 text-white border-green-400 shadow-lg shadow-green-200/50' 
+                    : status === 'current'
+                    ? 'bg-gradient-to-br from-blue-600 to-cyan-600 text-white border-blue-400 shadow-xl shadow-blue-200/50 scale-110 animate-pulse'
+                    : 'bg-white text-slate-400 border-slate-200'
+                  }
+                `}>
+                  {status === 'completed' ? (
+                    <Check className="w-5 h-5 md:w-6 md:h-6" />
+                  ) : (
+                    <Icon className="w-5 h-5 md:w-6 md:h-6" />
+                  )}
+                </div>
+                <span className={`
+                  mt-2 text-[10px] font-bold uppercase tracking-wider
+                  ${status === 'current' ? 'text-blue-600' : status === 'completed' ? 'text-green-600' : 'text-slate-400'}
+                `}>
+                  {step.label}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 };
@@ -335,152 +452,317 @@ const VitalsForm: React.FC<{
 }> = ({ onComplete, initialData, pastRecordsCount, onViewHistory }) => {
   const [formData, setFormData] = useState<PatientInfo>(initialData);
   const [showVitals, setShowVitals] = useState(false);
+  const [errors, setErrors] = useState<{[key: string]: string}>({});
+  const [touched, setTouched] = useState<{[key: string]: boolean}>({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [savedPatientInfo, setSavedPatientInfo] = useState<PatientInfo | null>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  // Load saved patient info from localStorage on mount
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('vitalguard_last_patient');
+      if (saved) {
+        const parsed = JSON.parse(saved) as PatientInfo;
+        if (parsed.name && parsed.age && parsed.gender) {
+          setSavedPatientInfo(parsed);
+        }
+      }
+    } catch (e) {
+      console.error('Failed to load saved patient info:', e);
+    }
+  }, []);
+
+  // Quick fill with saved patient info
+  const handleQuickFill = () => {
+    if (savedPatientInfo) {
+      setFormData(savedPatientInfo);
+      setTouched({});
+      setErrors({});
+    }
+  };
+
+  const validateField = (field: string, value: string): string => {
+    switch (field) {
+      case 'name':
+        if (!value.trim()) return 'Patient name is required';
+        if (value.trim().length < 2) return 'Name must be at least 2 characters';
+        if (value.length > 100) return 'Name is too long (max 100 characters)';
+        return '';
+      case 'age':
+        if (!value.trim()) return 'Age is required';
+        const ageNum = parseInt(value);
+        if (isNaN(ageNum)) return 'Please enter a valid number';
+        if (ageNum < 0 || ageNum > 150) return 'Please enter a valid age (0-150)';
+        return '';
+      case 'gender':
+        if (!value) return 'Please select a gender';
+        return '';
+      case 'weight':
+        if (value && isNaN(parseFloat(value))) return 'Please enter a valid number';
+        if (value && (parseFloat(value) < 0 || parseFloat(value) > 500)) return 'Please enter a valid weight';
+        return '';
+      case 'height':
+        if (value && isNaN(parseFloat(value))) return 'Please enter a valid number';
+        if (value && (parseFloat(value) < 0 || parseFloat(value) > 300)) return 'Please enter a valid height';
+        return '';
+      default:
+        return '';
+    }
+  };
+
+  const handleBlur = (field: string) => {
+    setTouched(prev => ({ ...prev, [field]: true }));
+    const error = validateField(field, formData[field as keyof PatientInfo] || '');
+    setErrors(prev => ({ ...prev, [field]: error }));
+  };
+
+  const handleChange = (field: string, value: string) => {
+    setFormData({ ...formData, [field]: value });
+    if (touched[field]) {
+      const error = validateField(field, value);
+      setErrors(prev => ({ ...prev, [field]: error }));
+    }
+  };
+
+  const validateForm = (): boolean => {
+    const newErrors: {[key: string]: string} = {};
+    const requiredFields = ['name', 'age', 'gender'];
+    
+    requiredFields.forEach(field => {
+      const error = validateField(field, formData[field as keyof PatientInfo] || '');
+      if (error) newErrors[field] = error;
+    });
+
+    // Validate optional fields if they have values
+    if (formData.weight) {
+      const error = validateField('weight', formData.weight);
+      if (error) newErrors['weight'] = error;
+    }
+    if (formData.height) {
+      const error = validateField('height', formData.height);
+      if (error) newErrors['height'] = error;
+    }
+
+    setErrors(newErrors);
+    setTouched({ name: true, age: true, gender: true, weight: true, height: true });
+    return Object.keys(newErrors).length === 0;
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!validateForm()) return;
+    
+    setIsSubmitting(true);
+    // Simulate brief loading state for UX feedback
+    await new Promise(resolve => setTimeout(resolve, 300));
+    
+    // Save patient info to localStorage for future quick-fill
+    try {
+      localStorage.setItem('vitalguard_last_patient', JSON.stringify(formData));
+    } catch (e) {
+      console.error('Failed to save patient info:', e);
+    }
+    
+    setIsSubmitting(false);
     onComplete(formData);
   };
 
-  return (
-    <div className="max-w-2xl mx-auto bg-white rounded-[2.5rem] md:rounded-[2.5rem] rounded-3xl shadow-2xl p-5 md:p-10 border border-slate-100 animate-in fade-in slide-in-from-bottom-6 duration-700 relative overflow-hidden">
-      {/* Decorative background gradient */}
-      <div className="absolute top-0 right-0 w-64 h-64 bg-gradient-to-br from-blue-100 to-cyan-50 rounded-full blur-3xl opacity-30 -z-10"></div>
-      <div className="absolute bottom-0 left-0 w-48 h-48 bg-gradient-to-tr from-cyan-100 to-blue-50 rounded-full blur-3xl opacity-30 -z-10"></div>
+  const getInputClassName = (field: string, baseClasses: string) => {
+    const hasError = touched[field] && errors[field];
+    const isValid = touched[field] && !errors[field] && formData[field as keyof PatientInfo];
+    
+    return `${baseClasses} ${
+      hasError 
+        ? 'border-red-400 focus:border-red-500 focus:ring-red-100' 
+        : isValid 
+          ? 'border-green-400 focus:border-green-500 focus:ring-green-100'
+          : ''
+    }`;
+  };
 
-      <div className="flex items-center justify-between mb-10">
-        <div className="flex items-center gap-5">
-          <div className="p-4 bg-gradient-to-br from-blue-600 to-cyan-500 rounded-2xl text-white shadow-xl shadow-blue-200/50 transform hover:scale-105 transition-transform">
-            <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-            </svg>
+  const ErrorMessage: React.FC<{field: string}> = ({ field }) => {
+    if (!touched[field] || !errors[field]) return null;
+    return (
+      <p className="mt-1.5 text-xs font-semibold text-red-500 flex items-center gap-1.5 animate-in fade-in slide-in-from-top-1 duration-200">
+        <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+          <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+        </svg>
+        {errors[field]}
+      </p>
+    );
+  };
+
+  return (
+
+    <div className="max-w-2xl mx-auto card-premium rounded-xl p-8 animate-fade-in relative overflow-hidden">
+      <div className="flex items-center justify-between mb-8">
+        <div className="flex items-center gap-4">
+          <div className="p-3 bg-blue-600/10 rounded-xl text-blue-600">
+            <Activity className="w-8 h-8" />
           </div>
           <div>
-            <h2 className="text-3xl font-black bg-gradient-to-r from-slate-800 to-blue-900 bg-clip-text text-transparent tracking-tighter">Patient Registry</h2>
-            <p className="text-sm text-slate-500 font-semibold">Complete profile for AI consultation</p>
+            <h2 className="text-2xl font-bold text-slate-900 tracking-tight">Patient Registry</h2>
+            <p className="text-sm text-slate-500">Complete profile for AI consultation</p>
           </div>
         </div>
+        
+        {/* Quick Fill Button for Returning Users */}
+        {savedPatientInfo && !formData.name && (
+          <button
+            type="button"
+            onClick={handleQuickFill}
+            className="flex items-center gap-2 px-4 py-2 bg-green-50 border border-green-200 rounded-lg text-green-700 font-semibold text-sm hover:bg-green-100 transition-colors"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+            </svg>
+            Continue as {savedPatientInfo.name}
+          </button>
+        )}
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-6">
+      <form onSubmit={handleSubmit} className="space-y-6" noValidate>
         <div>
-          <label className="block text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-2 flex items-center gap-2">
-            <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
-            Patient Full Name
+          <label className="block text-sm font-semibold text-slate-700 mb-2">
+            Patient Full Name <span className="text-red-500">*</span>
           </label>
           <input
             type="text"
-            required
-            className="w-full px-5 py-4 rounded-2xl border-2 border-slate-100 focus:border-blue-500 focus:ring-4 focus:ring-blue-100 outline-none transition bg-gradient-to-b from-slate-50 to-white font-semibold text-slate-800 placeholder:text-slate-400"
+            className={getInputClassName('name', "input-premium")}
             value={formData.name}
-            onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+            onChange={(e) => handleChange('name', e.target.value)}
+            onBlur={() => handleBlur('name')}
             placeholder="e.g. Rajesh Kumar"
+            maxLength={100}
+            aria-invalid={!!errors['name']}
+            aria-describedby={errors['name'] ? 'name-error' : undefined}
           />
+          <ErrorMessage field="name" />
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
           <div>
-            <label className="block text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-2 flex items-center gap-2">
-              <span className="w-1.5 h-1.5 rounded-full bg-cyan-500"></span>
-              Age
+            <label className="block text-sm font-semibold text-slate-700 mb-2">
+              Age <span className="text-red-500">*</span>
             </label>
             <input
-              type="text"
-              required
-              className="w-full px-5 py-4 rounded-2xl border-2 border-slate-100 focus:border-cyan-500 focus:ring-4 focus:ring-cyan-100 outline-none transition bg-gradient-to-b from-slate-50 to-white font-semibold text-slate-800 placeholder:text-slate-400"
+              type="number"
+              min="0"
+              max="150"
+              className={getInputClassName('age', "input-premium")}
               value={formData.age}
-              onChange={(e) => setFormData({ ...formData, age: e.target.value })}
+              onChange={(e) => handleChange('age', e.target.value)}
+              onBlur={() => handleBlur('age')}
               placeholder="e.g. 35"
+              aria-invalid={!!errors['age']}
             />
+            <ErrorMessage field="age" />
           </div>
           <div>
-            <label className="block text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-2 flex items-center gap-2">
-              <span className="w-1.5 h-1.5 rounded-full bg-cyan-500"></span>
-              Gender
+            <label className="block text-sm font-semibold text-slate-700 mb-2">
+              Gender <span className="text-red-500">*</span>
             </label>
             <select
-              required
-              className="w-full px-5 py-4 rounded-2xl border-2 border-slate-100 focus:border-cyan-500 focus:ring-4 focus:ring-cyan-100 outline-none transition bg-gradient-to-b from-slate-50 to-white font-semibold text-slate-800"
+              className={getInputClassName('gender', "input-premium")}
               value={formData.gender}
-              onChange={(e) => setFormData({ ...formData, gender: e.target.value })}
+              onChange={(e) => handleChange('gender', e.target.value)}
+              onBlur={() => handleBlur('gender')}
+              aria-invalid={!!errors['gender']}
             >
-              <option value="">Select</option>
+              <option value="">Select Gender</option>
               <option value="Male">Male</option>
               <option value="Female">Female</option>
               <option value="Other">Other</option>
             </select>
+            <ErrorMessage field="gender" />
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={() => setShowVitals(!showVitals)}
-          className="text-blue-600 font-black text-sm uppercase tracking-wide hover:text-cyan-600 transition-colors flex items-center gap-2"
-        >
-          <svg className={`w-4 h-4 transition-transform ${showVitals ? 'rotate-90' : ''}`} fill="currentColor" viewBox="0 0 20 20">
-            <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
-          </svg>
-          Quick Vital Signs (Optional)
-        </button>
+        <div>
+          <button
+            type="button"
+            onClick={() => setShowVitals(!showVitals)}
+            className="text-blue-600 font-semibold text-sm hover:text-blue-700 transition-colors flex items-center gap-2"
+          >
+            <ChevronRight className={`w-4 h-4 transition-transform ${showVitals ? 'rotate-90' : ''}`} />
+            Add Vital Signs (Optional)
+          </button>
+        </div>
 
         {showVitals && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 p-4 md:p-6 bg-gradient-to-br from-blue-50 to-cyan-50 rounded-2xl border-2 border-blue-100 animate-in slide-in-from-top duration-300">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 p-6 bg-slate-50 rounded-lg border border-slate-200 animate-fade-in">
             <div>
-              <label className="block text-[10px] font-black text-blue-700 uppercase tracking-[0.2em] mb-2">Weight (kg)</label>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">Weight (kg)</label>
               <input
-                type="text"
-                className="w-full px-5 py-3 rounded-xl border-2 border-blue-100 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition bg-white font-semibold text-slate-800 placeholder:text-slate-400"
+                type="number"
+                min="0"
+                max="500"
+                step="0.1"
+                className={getInputClassName('weight', "input-premium")}
                 value={formData.weight}
-                onChange={(e) => setFormData({ ...formData, weight: e.target.value })}
+                onChange={(e) => handleChange('weight', e.target.value)}
+                onBlur={() => handleBlur('weight')}
                 placeholder="e.g. 70"
               />
+              <ErrorMessage field="weight" />
             </div>
             <div>
-              <label className="block text-[10px] font-black text-blue-700 uppercase tracking-[0.2em] mb-2">Height (cm)</label>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">Height (cm)</label>
               <input
-                type="text"
-                className="w-full px-5 py-3 rounded-xl border-2 border-blue-100 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition bg-white font-semibold text-slate-800 placeholder:text-slate-400"
+                type="number"
+                min="0"
+                max="300"
+                step="0.1"
+                className={getInputClassName('height', "input-premium")}
                 value={formData.height}
-                onChange={(e) => setFormData({ ...formData, height: e.target.value })}
+                onChange={(e) => handleChange('height', e.target.value)}
+                onBlur={() => handleBlur('height')}
                 placeholder="e.g. 175"
               />
+              <ErrorMessage field="height" />
             </div>
           </div>
         )}
 
         <div>
-          <label className="block text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-2 flex items-center gap-2">
-            <span className="w-1.5 h-1.5 rounded-full bg-violet-500"></span>
+          <label className="block text-sm font-semibold text-slate-700 mb-2">
             Medical History & Allergies
           </label>
           <textarea
-            className="w-full px-5 py-4 rounded-2xl border-2 border-slate-100 focus:border-violet-500 focus:ring-4 focus:ring-violet-100 outline-none transition h-28 bg-gradient-to-b from-slate-50 to-white font-medium text-slate-800 resize-none placeholder:text-slate-400"
+            className="input-premium min-h-[100px] resize-none"
             value={formData.history}
             onChange={(e) => setFormData({ ...formData, history: e.target.value })}
-            placeholder="Known conditions or allergies..."
+            placeholder="Please describe any known conditions, allergies, or previous surgeries..."
+            maxLength={2000}
           ></textarea>
         </div>
 
-        <div className="flex flex-col gap-4 pt-6 border-t-2 border-slate-100">
+        <div className="pt-6 border-t border-slate-100 flex flex-col gap-4">
           <button
             type="submit"
-            className="w-full bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 text-white font-black py-5 rounded-2xl shadow-2xl shadow-blue-200/50 transition-all active:scale-[0.98] text-sm uppercase tracking-widest group relative overflow-hidden"
+            disabled={isSubmitting}
+            className="w-full btn-primary flex justify-center items-center gap-2 group disabled:opacity-70 disabled:cursor-not-allowed"
           >
-            <span className="relative z-10 flex items-center justify-center gap-2">
-              {pastRecordsCount > 0 ? 'Resume Medical Session' : 'Start AI Consultation'}
-              <svg className="w-5 h-5 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 7l5 5m0 0l-5 5m5-5H6" />
-              </svg>
-            </span>
-            <div className="absolute inset-0 bg-gradient-to-r from-cyan-600 to-blue-600 opacity-0 group-hover:opacity-100 transition-opacity"></div>
+            {isSubmitting ? (
+              <>
+                <Loader2 className="w-5 h-5 animate-spin opacity-70" />
+                Processing...
+              </>
+            ) : (
+              <>
+                {pastRecordsCount > 0 ? 'Resume Medical Session' : 'Start AI Consultation'}
+                <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+              </>
+            )}
           </button>
 
           {pastRecordsCount > 0 && (
             <button
               type="button"
               onClick={onViewHistory}
-              className="w-full bg-white border-2 border-slate-200 text-slate-700 font-bold py-5 rounded-2xl hover:bg-slate-50 hover:border-blue-200 transition-all flex items-center justify-center gap-3 text-sm shadow-md hover:shadow-xl group"
+              className="w-full btn-outline flex items-center justify-center gap-2"
             >
-              <svg className="w-5 h-5 text-blue-600 group-hover:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeWidth="2.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+              <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
               View Clinical History Vault ({pastRecordsCount})
             </button>
           )}
@@ -493,11 +775,12 @@ const VitalsForm: React.FC<{
 const ChatInterface: React.FC<{
   messages: Message[];
   onSendMessage: (msg: string, attachments?: Attachment[]) => void;
+  onRetryMessage?: (text: string, attachments?: Attachment[]) => void;
   isProcessing: boolean;
   onFinish: () => void;
   patientName: string;
   language: Language;
-}> = ({ messages, onSendMessage, isProcessing, onFinish, patientName, language }) => {
+}> = ({ messages, onSendMessage, onRetryMessage, isProcessing, onFinish, patientName, language }) => {
   const [input, setInput] = useState('');
   const [isListening, setIsListening] = useState(false);
   const [micError, setMicError] = useState<string | null>(null);
@@ -671,206 +954,170 @@ const ChatInterface: React.FC<{
   };
 
   return (
-    <div className="flex flex-col h-[calc(100vh-8rem)] md:h-[780px] bg-white rounded-2xl md:rounded-[2.5rem] shadow-2xl overflow-hidden border border-slate-100 relative">
-      <div className="bg-slate-900 text-white px-4 md:px-8 py-4 md:py-6 flex justify-between items-center relative z-10">
+
+    <div className="flex flex-col h-[calc(100vh-8rem)] md:h-[780px] card-premium rounded-xl overflow-hidden relative">
+      <div className="bg-slate-900 text-white px-6 py-4 flex justify-between items-center z-10">
         <div className="flex items-center gap-4">
-          <div className="w-12 h-12 bg-blue-600 rounded-2xl flex items-center justify-center font-black border-2 border-slate-800 text-lg shadow-inner">Dr</div>
+          <div className="w-10 h-10 bg-slate-800 rounded-full flex items-center justify-center font-bold border border-slate-700 text-sm">
+            Pt
+          </div>
           <div>
-            <p className="font-bold text-sm tracking-tight">{patientName}</p>
-            <p className="text-[9px] text-slate-400 uppercase tracking-widest font-black">Clinical Consultation Active</p>
+            <p className="font-bold text-sm tracking-wide">{patientName}</p>
+            <p className="text-xs text-slate-400">Clinical Consultation Active</p>
           </div>
         </div>
-        <button
-          onClick={onFinish}
-          disabled={messages.length < 2 || isProcessing}
-          className="bg-blue-600 hover:bg-blue-500 px-6 py-2.5 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all shadow-lg disabled:opacity-50"
-        >
-          Finalize Assessment
-        </button>
+        {/* 'Finalize' button removed from here, moved to bottom */}
       </div>
 
-      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 md:p-8 space-y-4 md:space-y-8 bg-slate-50/20">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6 bg-slate-50">
         {messages.map((m, idx) => (
-          <div key={idx} className="space-y-3">
-            <div className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in duration-300`}>
-              <div className={`max-w-[90%] md:max-w-[85%] rounded-[1.5rem] px-4 md:px-6 py-4 md:py-5 ${m.role === 'user'
-                ? 'bg-blue-600 text-white rounded-tr-none shadow-xl shadow-blue-50/50'
-                : 'bg-white text-slate-800 shadow-sm border border-slate-100 rounded-tl-none'
-                }`}>
-                {m.attachments && m.attachments.length > 0 && (
-                  <div className="flex flex-wrap gap-3 mb-4">
-                    {m.attachments.map((at, i) => (
-                      <div key={i} className="relative">
-                        {at.mimeType.startsWith('image/') ? (
-                          <img
-                            src={`data:${at.mimeType};base64,${at.data}`}
-                            className="max-h-48 rounded-xl border-2 border-white/20 shadow-md"
-                            alt="Patient uploaded clinical media"
-                          />
-                        ) : (
-                          <div className="bg-white/10 backdrop-blur-md p-3 rounded-xl border border-white/10 flex items-center gap-3 min-w-[120px]">
-                            <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                            <span className="text-[10px] font-black uppercase tracking-tighter truncate max-w-[100px] text-white">{at.name}</span>
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-                <p className={`whitespace-pre-wrap leading-relaxed text-sm ${m.role === 'model' ? 'font-bold' : 'font-medium'
-                  }`}>
-                  {m.text || (m.attachments?.length ? "Clinical documents attached." : "")}
-                </p>
-              </div>
-            </div>
-            {m.question && m.role === 'model' && m.question.options.length > 0 && (
-              <div className="flex justify-start">
-                <div className="max-w-[85%]">
-                  <CheckboxQuestion
-                    question={m.question}
-                    onSelectionChange={(selectedOptions) => {
-                      const selectedLabels = m.question!.options
-                        .filter(opt => selectedOptions.includes(opt.id))
-                        .map(opt => opt.label);
-                      setSelectedCheckboxOptions(selectedLabels);
-                      setInput(selectedLabels.join(', '));
-                    }}
-                  />
+          <div key={idx} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'} animate-fade-in`}>
+            <div className={`max-w-[85%] md:max-w-[75%] rounded-2xl px-5 py-4 shadow-sm ${m.role === 'user'
+              ? 'bg-blue-600 text-white rounded-br-none'
+              : 'bg-white text-slate-800 border border-slate-200 rounded-bl-none'
+              }`}>
+              {m.attachments && m.attachments.length > 0 && (
+                <div className="flex flex-wrap gap-2 mb-3">
+                  {m.attachments.map((at, i) => (
+                    <div key={i} className="relative">
+                      {at.mimeType.startsWith('image/') ? (
+                        <img
+                          src={`data:${at.mimeType};base64,${at.data}`}
+                          className="max-h-40 rounded-lg border border-white/20"
+                          alt="Attachment"
+                        />
+                      ) : (
+                        <div className="bg-white/10 backdrop-blur-sm p-3 rounded-lg border border-white/10 flex items-center gap-2">
+                          <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeWidth="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
+                          <span className="text-xs font-medium truncate max-w-[120px] text-white">{at.name}</span>
+                        </div>
+                      )}
+                    </div>
+                  ))}
                 </div>
+              )}
+              <p className={`whitespace-pre-wrap leading-relaxed text-sm ${m.role === 'model' ? 'font-medium' : ''}`}>
+                {m.text || (m.attachments?.length ? "Attachments uploaded." : "")}
+              </p>
+              
+              <div className={`text-[10px] mt-2 flex items-center justify-end gap-1 ${m.role === 'user' ? 'text-blue-100' : 'text-slate-400'}`}>
+                {formatTimestamp(m.timestamp)}
               </div>
-            )}
+              
+              {m.role === 'model' && m.text?.startsWith('Error:') && onRetryMessage && (
+                <button
+                  onClick={() => {
+                    const prevMsg = messages[idx - 1];
+                    if (prevMsg) onRetryMessage(prevMsg.text, prevMsg.attachments);
+                  }}
+                  className="mt-2 text-xs font-bold text-red-500 hover:text-red-600 flex items-center gap-1"
+                >
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                  Retry
+                </button>
+              )}
+            </div>
           </div>
         ))}
+        
+        {messages.map((m, idx) => (
+           m.question && m.role === 'model' && m.question.options.length > 0 && (
+             <div key={`q-${idx}`} className="flex justify-start animate-fade-in">
+               <div className="max-w-[85%] md:max-w-[75%]">
+                 <CheckboxQuestion
+                   question={m.question}
+                   onSelectionChange={(selectedOptions) => {
+                     const selectedLabels = m.question!.options
+                       .filter(opt => selectedOptions.includes(opt.id))
+                       .map(opt => opt.label);
+                     setSelectedCheckboxOptions(selectedLabels);
+                     setInput(selectedLabels.join(', '));
+                   }}
+                 />
+               </div>
+             </div>
+           )
+        ))}
+
         {isProcessing && (
           <div className="flex justify-start">
-            <div className="bg-white rounded-2xl px-6 py-4 shadow-sm border border-slate-100 flex gap-2 items-center">
-              <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce"></div>
-              <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce delay-75"></div>
-              <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce delay-150"></div>
+            <div className="bg-white rounded-2xl px-4 py-3 shadow-sm border border-slate-200 flex items-center gap-2">
+              <div className="flex gap-1">
+                <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce"></div>
+                <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce delay-75"></div>
+                <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce delay-150"></div>
+              </div>
+              <span className="text-xs text-slate-500 font-medium">Analyzing...</span>
             </div>
           </div>
         )}
       </div>
 
       {showCamera && (
-        <div className="fixed inset-0 bg-slate-950/95 z-[60] flex flex-col items-center justify-center p-8 transition-all">
-          <div className={`relative max-w-2xl w-full rounded-[2.5rem] overflow-hidden shadow-2xl border-4 border-white/5 mb-8 ${isCapturing ? 'brightness-150 scale-[1.02]' : 'brightness-100 scale-100'} transition-all duration-150`}>
+        <div className="absolute inset-0 bg-black z-50 flex flex-col">
+          <div className="relative flex-1">
             <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover" />
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <div className="w-64 h-64 border-2 border-dashed border-white/20 rounded-full"></div>
+              <div className="w-64 h-48 border-2 border-white/30 rounded-lg"></div>
             </div>
-            {isCapturing && (
-              <div className="absolute inset-0 bg-white/40 flex items-center justify-center animate-pulse">
-                <div className="bg-white p-6 rounded-full shadow-2xl">
-                  <svg className="w-12 h-12 text-blue-600" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
-                </div>
-              </div>
-            )}
           </div>
-          <div className="flex gap-6">
+          <div className="p-6 bg-slate-900 flex justify-center gap-8">
+            <button
+              onClick={stopCamera}
+              className="px-6 py-3 rounded-full bg-slate-800 text-white font-semibold text-sm"
+            >
+              Cancel
+            </button>
             <button
               onClick={capturePhoto}
-              disabled={isCapturing}
-              className="bg-white text-slate-900 px-12 py-5 rounded-2xl font-black uppercase tracking-[0.2em] text-[10px] shadow-2xl active:scale-95 disabled:opacity-50 transition-all flex items-center gap-3"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeWidth="3" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" /><path strokeWidth="3" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-              Capture Frame
-            </button>
-            <button onClick={stopCamera} className="bg-white/10 text-white px-10 py-5 rounded-2xl font-black uppercase tracking-[0.2em] text-[10px] border border-white/10 backdrop-blur-md">Cancel</button>
+              className="w-16 h-16 rounded-full bg-white border-4 border-slate-300 shadow-lg active:scale-95 transition-transform"
+            ></button>
           </div>
         </div>
       )}
 
-      {showCamera && (
-        <div className="fixed inset-0 bg-slate-950/95 z-[60] flex flex-col items-center justify-center p-8 transition-all">
-          <div className={`relative max-w-2xl w-full rounded-[2.5rem] overflow-hidden shadow-2xl border-4 border-white/5 mb-8 ${isCapturing ? 'brightness-150 scale-[1.02]' : 'brightness-100 scale-100'} transition-all duration-150`}>
-            <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover" />
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <div className="w-64 h-64 border-2 border-dashed border-white/20 rounded-full"></div>
-            </div>
-            {isCapturing && (
-              <div className="absolute inset-0 bg-white/40 flex items-center justify-center animate-pulse">
-                <div className="bg-white p-6 rounded-full shadow-2xl">
-                  <svg className="w-12 h-12 text-blue-600" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
-                </div>
-              </div>
-            )}
-          </div>
-          <div className="flex gap-6">
-            <button
-              onClick={capturePhoto}
-              disabled={isCapturing}
-              className="bg-white text-slate-900 px-12 py-5 rounded-2xl font-black uppercase tracking-[0.2em] text-[10px] shadow-2xl active:scale-95 disabled:opacity-50 transition-all flex items-center gap-3"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeWidth="3" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" /><path strokeWidth="3" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-              Capture Frame
-            </button>
-            <button onClick={stopCamera} className="bg-white/10 text-white px-10 py-5 rounded-2xl font-black uppercase tracking-[0.2em] text-[10px] border border-white/10 backdrop-blur-md">Cancel</button>
-          </div>
-        </div>
-      )}
-
-      <div className="p-2 md:p-6 bg-white border-t space-y-2 md:space-y-5 shadow-inner relative z-20">
+      <div className="p-4 bg-white border-t border-slate-200">
         {attachments.length > 0 && (
-          <div className="flex flex-wrap gap-2 md:gap-4 mb-1 md:mb-2 p-1 border-b border-slate-50 pb-2 md:pb-4">
+          <div className="flex gap-3 mb-3 pb-3 border-b border-slate-100 overflow-x-auto">
             {attachments.map((at, i) => (
-              <div key={i} className="relative group animate-in zoom-in-50 duration-200">
+              <div key={i} className="relative group shrink-0">
                 {at.mimeType.startsWith('image/') ? (
-                  <img src={`data:${at.mimeType};base64,${at.data}`} className="w-14 h-14 md:w-20 md:h-20 object-cover rounded-xl md:rounded-2xl border-2 border-blue-100 shadow-md" />
+                   <img src={`data:${at.mimeType};base64,${at.data}`} className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
                 ) : (
-                  <div className="w-14 h-14 md:w-20 md:h-20 bg-blue-50 flex flex-col items-center justify-center rounded-xl md:rounded-2xl border-2 border-blue-100 text-[7px] md:text-[8px] font-black text-center p-1 md:p-2 text-blue-600 uppercase tracking-tighter">
-                    <svg className="w-4 h-4 md:w-6 md:h-6 mb-0.5 md:mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeWidth="2.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                    <span className="truncate max-w-[48px] md:max-w-full">{at.name}</span>
+                  <div className="w-16 h-16 bg-slate-50 flex flex-col items-center justify-center rounded-lg border border-slate-200">
+                    <FileText className="w-6 h-6 text-slate-400" />
                   </div>
                 )}
                 <button
                   onClick={() => setAttachments(prev => prev.filter((_, idx) => idx !== i))}
-                  className="absolute -top-2 -right-2 md:-top-3 md:-right-3 bg-red-500 text-white rounded-full w-5 h-5 md:w-6 md:h-6 text-[9px] md:text-[10px] flex items-center justify-center shadow-xl border-2 border-white transition-transform hover:scale-110"
-                >✕</button>
+                  className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center shadow-sm text-xs hover:bg-red-600"
+                >
+                  <X className="w-3 h-3" />
+                </button>
               </div>
             ))}
           </div>
         )}
 
-        <form onSubmit={handleSend} className="flex flex-col md:flex-row gap-2 md:gap-3">
-          {/* Mobile: Input row first for prominence */}
-          <div className="flex gap-2 md:contents order-2 md:order-none">
-            <input
-              type="text"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder={isListening ? "Listening..." : attachments.length ? "Files attached..." : "Describe your symptoms..."}
-              className="flex-1 min-w-0 px-4 py-3 md:py-4 rounded-xl md:rounded-[1.25rem] border border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none transition-all text-sm font-medium bg-white"
-              disabled={isProcessing || isUploading}
-            />
-            <button
-              type="submit"
-              disabled={(!input.trim() && attachments.length === 0) || isProcessing || isUploading}
-              className="bg-blue-600 text-white px-5 md:px-10 py-3 md:py-4 rounded-xl md:rounded-[1.25rem] hover:bg-blue-700 transition-all disabled:opacity-50 font-bold md:font-black uppercase tracking-wider md:tracking-widest text-xs md:text-[10px] shadow-lg active:scale-95 whitespace-nowrap"
-            >
-              Send
-            </button>
-          </div>
-          
-          {/* Mobile: Action buttons row - compact */}
-          <div className="flex gap-1.5 md:gap-2 order-1 md:order-none md:contents">
+        {/* Action Bar */}
+        <div className="flex flex-col gap-3">
+          <form onSubmit={handleSend} className="flex gap-2">
             <button
               type="button"
               onClick={startCamera}
-              className="p-2.5 md:p-4 bg-slate-100 md:bg-slate-50 rounded-xl md:rounded-[1.25rem] text-slate-500 hover:bg-blue-50 hover:text-blue-600 transition-all border border-slate-200 md:border-slate-50"
-              title="Camera Analysis"
+              className="p-3 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+              title="Open Camera"
             >
-              <svg className="w-5 h-5 md:w-6 md:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeWidth="2.5" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" /><path strokeWidth="2.5" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+              <Camera className="w-6 h-6" />
             </button>
-
+            
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              className="p-2.5 md:p-4 bg-slate-100 md:bg-slate-50 rounded-xl md:rounded-[1.25rem] text-slate-500 hover:bg-green-50 hover:text-green-600 transition-all border border-slate-200 md:border-slate-50"
-              title="Upload Documents"
-              disabled={isProcessing || isUploading}
+              className="p-3 text-slate-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors"
+              title="Attach File"
             >
-              <svg className="w-5 h-5 md:w-6 md:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeWidth="2.5" d="M12 4v16m8-8H4" /></svg>
+              <Paperclip className="w-6 h-6" />
             </button>
             <input
               ref={fileInputRef}
@@ -881,39 +1128,51 @@ const ChatInterface: React.FC<{
               className="hidden"
             />
 
+            <div className="flex-1 relative">
+              <input
+                type="text"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                placeholder={isListening ? "Listening..." : "Type your symptoms..."}
+                className="w-full px-4 py-3 bg-slate-100 border-0 rounded-xl focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all text-sm pr-10"
+                disabled={isProcessing || isUploading}
+              />
+              <button
+                 type="button"
+                 onClick={startListening}
+                 className={`absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-lg ${isListening ? 'text-red-500 animate-pulse' : 'text-slate-400 hover:text-blue-600'}`}
+              >
+                 {isListening ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+              </button>
+            </div>
+
             <button
-              type="button"
-              onClick={startListening}
-              disabled={isProcessing}
-              className={`p-2.5 md:p-4 rounded-xl md:rounded-[1.25rem] transition-all border ${isListening ? 'bg-red-100 text-red-600 border-red-200 animate-pulse' : 'bg-slate-100 md:bg-slate-50 text-slate-500 hover:bg-purple-50 hover:text-purple-600 border-slate-200 md:border-slate-50'}`}
-              title={isListening ? "Listening..." : "Voice Input"}
+              type="submit"
+              disabled={(!input.trim() && attachments.length === 0) || isProcessing || isUploading}
+              className="bg-blue-600 hover:bg-blue-700 text-white p-3 rounded-xl disabled:opacity-50 transition-colors shadow-sm"
             >
-              <svg className="w-5 h-5 md:w-6 md:h-6" fill={isListening ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24"><path strokeWidth="2.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4" /></svg>
+              <Send className="w-6 h-6" />
             </button>
+          </form>
+
+          {/* Moved Finalize Button Here */}
+          <div className="flex items-center justify-between border-t border-slate-100 pt-3">
+            <div className="text-xs font-medium text-slate-500 flex items-center gap-2">
+              {micError && <span className="text-red-500 flex items-center gap-1"><AlertTriangle className="w-3 h-3"/> {micError}</span>}
+              {isUploading && <span className="text-blue-600 flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin"/> {uploadStatus}</span>}
+              {isProcessing && !isUploading && <span className="text-blue-600 flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin"/> AI is thinking...</span>}
+            </div>
             
-            {/* Spacer text on mobile to show what buttons do */}
-            <span className="md:hidden flex-1 flex items-center text-[10px] text-slate-400 font-medium pl-1">
-              {isListening ? "🎤 Listening..." : isUploading ? "📎 Uploading..." : ""}
-            </span>
+            <button
+              onClick={onFinish}
+              disabled={messages.length < 2 || isProcessing}
+              className="bg-red-500 hover:bg-red-600 text-white px-6 py-2 rounded-lg text-xs font-bold uppercase tracking-wide transition-colors disabled:opacity-50 disabled:bg-slate-300 shadow-sm hover:shadow-red-200 flex items-center gap-2"
+            >
+              <Check className="w-4 h-4" />
+              Finalize Consultation
+            </button>
           </div>
-        </form>
-
-        {micError && (
-          <div className="px-6 py-3 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm font-medium">
-            🎤 {micError}
-          </div>
-        )}
-
-        {isUploading && (
-          <div className="px-6 py-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-700 text-sm font-medium flex items-center gap-2">
-            <div className="animate-spin">⟳</div> {uploadStatus || 'Processing documents...'}
-          </div>
-        )}
-        {isProcessing && !isUploading && (
-          <div className="px-6 py-3 bg-blue-50 border border-blue-200 rounded-xl text-blue-700 text-sm font-medium flex items-center gap-2">
-            <div className="animate-spin">⟳</div> Doctor is analyzing...
-          </div>
-        )}
+        </div>
       </div>
     </div>
   );
@@ -923,12 +1182,14 @@ const HistoryView: React.FC<{
   records: ClinicalRecord[];
   onBack: () => void;
   onSelect: (record: ClinicalRecord) => void;
-}> = ({ records, onBack, onSelect }) => {
+  onDelete: (recordId: string) => void;
+}> = ({ records, onBack, onSelect, onDelete }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState<'all' | 'patient' | 'diagnosis'>('all');
   const [sortBy, setSortBy] = useState<'date' | 'name' | 'diagnosis'>('date');
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [selectedLanguage, setSelectedLanguage] = useState<Language | 'all'>('all');
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
   let filteredRecords = records;
 
@@ -961,6 +1222,18 @@ const HistoryView: React.FC<{
       (a.report?.diagnosis || '').localeCompare(b.report?.diagnosis || '')
     );
   }
+
+  const handleDeleteClick = (e: React.MouseEvent, recordId: string) => {
+    e.stopPropagation();
+    setDeleteConfirmId(recordId);
+  };
+
+  const confirmDelete = () => {
+    if (deleteConfirmId) {
+      onDelete(deleteConfirmId);
+      setDeleteConfirmId(null);
+    }
+  };
 
   const handleExport = async () => {
     try {
@@ -995,24 +1268,54 @@ const HistoryView: React.FC<{
   };
 
   return (
-    <div className="max-w-5xl mx-auto animate-in fade-in duration-500">
-      <div className="flex items-center justify-between mb-8 px-4">
-        <h2 className="text-3xl font-black text-slate-800 flex items-center gap-4 tracking-tight">
-          <div className="p-3 bg-blue-600 rounded-2xl text-white shadow-xl shadow-blue-100">
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeWidth="3" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+    <div className="max-w-5xl mx-auto animate-fade-in">
+      {/* Delete Confirmation Modal */}
+      {deleteConfirmId && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-[100] animate-fade-in">
+          <div className="bg-white p-6 rounded-xl shadow-xl max-w-sm mx-4 animate-scale-in">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-2 bg-red-100 rounded-lg">
+                <AlertTriangle className="w-5 h-5 text-red-600" />
+              </div>
+              <h3 className="text-lg font-bold text-slate-900">Delete Record?</h3>
+            </div>
+            <p className="text-slate-600 text-sm mb-6">This action cannot be undone. The medical record will be permanently removed.</p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setDeleteConfirmId(null)}
+                className="flex-1 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg transition-colors text-sm"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDelete}
+                className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg transition-colors text-sm"
+              >
+                Delete
+              </button>
+            </div>
           </div>
-          Clinical Memory Vault ({filteredRecords.length})
+        </div>
+      )}
+
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-6 gap-4">
+        <h2 className="text-2xl font-bold text-slate-900 flex items-center gap-3 tracking-tight">
+          <div className="p-2 bg-blue-600 rounded-lg text-white shadow-sm">
+            <History className="w-5 h-5" />
+          </div>
+          Clinical History <span className="text-slate-400 text-lg font-normal">({filteredRecords.length})</span>
         </h2>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 w-full sm:w-auto">
           <button
             onClick={handleExport}
             disabled={records.length === 0}
-            className="bg-green-50 hover:bg-green-100 disabled:opacity-50 px-5 py-3 rounded-2xl border border-green-200 text-green-700 font-black text-[10px] uppercase tracking-widest shadow-sm transition-all"
+            className="flex-1 sm:flex-none bg-white hover:bg-slate-50 disabled:opacity-50 px-4 py-2 rounded-lg border border-slate-200 text-slate-700 font-semibold text-xs uppercase tracking-wide shadow-sm transition-colors flex items-center gap-2 justify-center"
             title="Export all records as JSON"
           >
-            📥 Export
+            <Download className="w-4 h-4" />
+            Export
           </button>
-          <label className="relative">
+          <label className="flex-1 sm:flex-none relative">
             <input
               type="file"
               accept=".json"
@@ -1023,14 +1326,15 @@ const HistoryView: React.FC<{
               onClick={(e) => {
                 e.currentTarget.parentElement?.querySelector('input')?.click();
               }}
-              className="bg-blue-50 hover:bg-blue-100 px-5 py-3 rounded-2xl border border-blue-200 text-blue-700 font-black text-[10px] uppercase tracking-widest shadow-sm transition-all"
+              className="w-full bg-white hover:bg-slate-50 px-4 py-2 rounded-lg border border-slate-200 text-slate-700 font-semibold text-xs uppercase tracking-wide shadow-sm transition-colors flex items-center gap-2 justify-center"
               title="Import records from JSON file"
             >
-              📤 Import
+              <Upload className="w-4 h-4" />
+              Import
             </button>
           </label>
-          <button onClick={onBack} className="bg-white px-6 py-3 rounded-2xl border border-slate-200 text-slate-500 hover:text-slate-800 font-black text-[10px] uppercase tracking-widest shadow-sm transition-all hover:shadow-md flex items-center gap-2">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeWidth="3" d="M15 19l-7-7 7-7" /></svg>
+          <button onClick={onBack} className="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-lg font-semibold text-xs uppercase tracking-wide shadow-sm transition-colors flex items-center gap-2">
+            <ArrowLeft className="w-4 h-4" />
             Back
           </button>
         </div>
@@ -1038,58 +1342,62 @@ const HistoryView: React.FC<{
 
       <div className="space-y-4 mb-8">
         <div className="flex flex-col md:flex-row gap-3">
-          <input
-            type="text"
-            placeholder="Search by patient name, diagnosis, or summary..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="flex-1 px-5 py-4 rounded-2xl border border-slate-100 focus:ring-2 focus:ring-blue-500 outline-none transition bg-white font-medium text-slate-700 shadow-sm"
-          />
+          <div className="flex-1 relative">
+            <Search className="w-5 h-5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              placeholder="Search patients, diagnoses..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-10 pr-4 py-2.5 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all text-sm font-medium"
+            />
+          </div>
           <button
             onClick={() => setShowAdvanced(!showAdvanced)}
-            className={`px-6 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all ${showAdvanced
-              ? 'bg-blue-600 text-white shadow-lg'
-              : 'bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200'
+            className={`px-4 py-2.5 rounded-lg font-semibold text-sm transition-colors flex items-center gap-2 ${showAdvanced
+              ? 'bg-blue-50 text-blue-700 border border-blue-200'
+              : 'bg-white text-slate-600 hover:bg-slate-50 border border-slate-200'
               }`}
           >
-            ⚙️ Filters
+            <Filter className="w-4 h-4" />
+            Filters
           </button>
         </div>
 
         {showAdvanced && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 p-4 md:p-6 bg-blue-50 rounded-2xl border border-blue-200">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 p-4 bg-slate-50 rounded-xl border border-slate-200 animate-fade-in">
             <div>
-              <label className="block text-[10px] font-black text-slate-600 uppercase mb-2">Search Type</label>
+              <label className="block text-xs font-semibold text-slate-500 mb-1.5">Search Field</label>
               <select
                 value={filterType}
                 onChange={(e) => setFilterType(e.target.value as any)}
-                className="w-full px-4 py-3 rounded-xl border border-blue-200 bg-white font-medium text-slate-700 focus:ring-2 focus:ring-blue-500 outline-none"
+                className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm focus:ring-2 focus:ring-blue-500 outline-none"
               >
                 <option value="all">All Fields</option>
-                <option value="patient">Patient Name Only</option>
-                <option value="diagnosis">Diagnosis Only</option>
+                <option value="patient">Patient Name</option>
+                <option value="diagnosis">Diagnosis</option>
               </select>
             </div>
 
             <div>
-              <label className="block text-[10px] font-black text-slate-600 uppercase mb-2">Sort By</label>
+              <label className="block text-xs font-semibold text-slate-500 mb-1.5">Sort Order</label>
               <select
                 value={sortBy}
                 onChange={(e) => setSortBy(e.target.value as any)}
-                className="w-full px-4 py-3 rounded-xl border border-blue-200 bg-white font-medium text-slate-700 focus:ring-2 focus:ring-blue-500 outline-none"
+                className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm focus:ring-2 focus:ring-blue-500 outline-none"
               >
                 <option value="date">Date (Newest)</option>
-                <option value="name">Patient Name (A-Z)</option>
+                <option value="name">Name (A-Z)</option>
                 <option value="diagnosis">Diagnosis (A-Z)</option>
               </select>
             </div>
 
             <div>
-              <label className="block text-[10px] font-black text-slate-600 uppercase mb-2">Language</label>
+              <label className="block text-xs font-semibold text-slate-500 mb-1.5">Language</label>
               <select
                 value={selectedLanguage}
                 onChange={(e) => setSelectedLanguage(e.target.value as any)}
-                className="w-full px-4 py-3 rounded-xl border border-blue-200 bg-white font-medium text-slate-700 focus:ring-2 focus:ring-blue-500 outline-none"
+                className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm focus:ring-2 focus:ring-blue-500 outline-none"
               >
                 <option value="all">All Languages</option>
                 <option value="en">English</option>
@@ -1101,49 +1409,68 @@ const HistoryView: React.FC<{
         )}
       </div>
 
-      <div className="grid grid-cols-1 gap-4">
+      <div className="grid grid-cols-1 gap-3">
         {filteredRecords.length === 0 ? (
-          <div className="bg-white p-24 rounded-[2rem] border border-slate-100 text-center text-slate-300 font-bold uppercase tracking-widest shadow-sm border-dashed">
-            {records.length === 0 ? 'No Records Yet • Start Your First Consultation' : 'No Matching Records Found'}
+          <div className="bg-white p-12 rounded-xl border border-dashed border-slate-200 text-center">
+            <div className="w-12 h-12 mx-auto mb-3 bg-slate-50 rounded-full flex items-center justify-center">
+              <Search className="w-6 h-6 text-slate-400" />
+            </div>
+            <p className="text-slate-500 font-medium text-sm">
+              {records.length === 0 ? 'No records found' : 'No matching records'}
+            </p>
           </div>
         ) : (
           filteredRecords.map((r) => (
-            <button
+            <div
               key={r.id}
+              className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm hover:shadow-md hover:border-blue-300 transition-all group cursor-pointer"
               onClick={() => onSelect(r)}
-              className="bg-white p-6 rounded-[1.5rem] border border-slate-100 shadow-sm hover:shadow-lg hover:border-blue-200 transition-all text-left group"
             >
-              <div className="flex justify-between items-start gap-4">
+              <div className="flex justify-between items-start gap-3">
                 <div className="flex-1">
-                  <div className="flex items-center gap-2 mb-2 flex-wrap">
-                    <span className="text-[8px] bg-blue-50 text-blue-600 px-3 py-1 rounded-full font-black uppercase tracking-widest">
-                      {new Date(r.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <span className="text-xs font-semibold text-slate-500">
+                      {new Date(r.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
                     </span>
-                    <span className="text-[8px] text-slate-300 font-black uppercase">ID: {r.id}</span>
-                    <span className={`text-[8px] px-2 py-1 rounded-full font-black uppercase tracking-widest ${r.language === 'en' ? 'bg-green-50 text-green-600' :
-                      r.language === 'hi' ? 'bg-orange-50 text-orange-600' :
-                        'bg-purple-50 text-purple-600'
-                      }`}>
-                      {r.language === 'en' ? '🇬🇧 EN' : r.language === 'hi' ? '🇮🇳 HI' : '🇮🇳 TE'}
+                    <span className="w-1 h-1 rounded-full bg-slate-300"></span>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wide border ${
+                      r.language === 'en' ? 'bg-blue-50 text-blue-600 border-blue-100' :
+                      r.language === 'hi' ? 'bg-orange-50 text-orange-600 border-orange-100' :
+                      'bg-purple-50 text-purple-600 border-purple-100'
+                    }`}>
+                      {r.language === 'en' ? 'EN' : r.language === 'hi' ? 'HI' : 'TE'}
                     </span>
                   </div>
-                  <p className="text-lg font-black text-slate-800 uppercase tracking-tight group-hover:text-blue-600 transition-colors mb-1">
+                  <h3 className="text-base font-bold text-slate-900 group-hover:text-blue-600 transition-colors mb-0.5">
                     {r.report?.diagnosis || 'Medical Assessment'}
-                  </p>
-                  <p className="text-sm text-slate-600 line-clamp-1">👤 {r.patientInfo.name} • {r.patientInfo.age}y • {r.patientInfo.gender}</p>
-                  <p className="text-xs text-slate-500 mt-2 line-clamp-1">"{r.report?.patientSummary}"</p>
+                  </h3>
+                  <div className="text-sm text-slate-600 flex items-center gap-2">
+                    <span className="font-medium text-slate-900">{r.patientInfo.name}</span>
+                    <span className="text-slate-300">|</span>
+                    <span>{r.patientInfo.age}y</span>
+                    <span className="text-slate-300">|</span>
+                    <span>{r.patientInfo.gender}</span>
+                  </div>
                 </div>
-                <div className="p-4 bg-slate-50 rounded-2xl group-hover:bg-blue-600 group-hover:text-white transition-all shrink-0">
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeWidth="3" d="M9 5l7 7-7 7" /></svg>
+                
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={(e) => handleDeleteClick(e, r.id)}
+                    className="p-2 text-slate-400 hover:bg-red-50 hover:text-red-600 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
+                    title="Delete record"
+                  >
+                    <Trash2 className="w-5 h-5" />
+                  </button>
+                  <ChevronRight className="w-5 h-5 text-slate-300" />
                 </div>
               </div>
-            </button>
+            </div>
           ))
         )}
       </div>
 
       {filteredRecords.length > 0 && (
-        <div className="mt-6 p-4 bg-slate-50 rounded-2xl border border-slate-100 text-center text-[10px] font-black text-slate-500 uppercase tracking-widest">
+        <div className="mt-4 text-center text-xs text-slate-400 font-medium">
           Showing {filteredRecords.length} of {records.length} records
         </div>
       )}
@@ -1153,69 +1480,70 @@ const HistoryView: React.FC<{
 
 const ReportView: React.FC<{ report: MedicalReport; patient: PatientInfo; onReset: () => void; }> = ({ report, patient, onReset }) => {
   return (
-    <div className="max-w-4xl mx-auto space-y-6 md:space-y-10 pb-20 md:pb-40 animate-in fade-in zoom-in-95 duration-700">
-      <div className="bg-white rounded-3xl md:rounded-[4rem] shadow-2xl overflow-hidden border border-slate-100">
-        <div className="bg-slate-950 text-white p-8 md:p-16 border-b-4 md:border-b-[12px] border-blue-600 relative overflow-hidden">
-          <div className="relative z-10 flex flex-col md:flex-row justify-between items-start gap-4 md:gap-0">
+    <div className="max-w-4xl mx-auto space-y-6 pb-20 animate-fade-in">
+      <div className="card-premium rounded-xl overflow-hidden shadow-lg border border-slate-200">
+        <div className="bg-slate-900 text-white p-8 border-b-4 border-blue-500 relative overflow-hidden">
+          <div className="relative z-10 flex flex-col md:flex-row justify-between items-start gap-4">
             <div>
-              <h1 className="text-4xl md:text-6xl font-black tracking-tighter uppercase leading-[0.85]">Clinical<br />Assessment</h1>
-              <p className="text-blue-400 font-black tracking-[0.3em] md:tracking-[0.5em] uppercase text-[8px] md:text-[9px] mt-4 md:mt-6">Secure Diagnostic Record • India Official</p>
+              <h1 className="text-3xl font-bold tracking-tight mb-2">Clinical Assessment</h1>
+              <p className="text-blue-300 font-medium text-xs uppercase tracking-wider">Official Medical Record</p>
             </div>
-            <div className="bg-white/5 p-3 md:p-4 rounded-2xl border border-white/10 backdrop-blur-xl text-right">
-              <p className="text-[8px] text-blue-300 font-black uppercase tracking-widest mb-1">Doc Ref</p>
-              <p className="text-xs md:text-sm font-mono font-black uppercase tracking-widest">#{Math.random().toString(36).substr(2, 6).toUpperCase()}</p>
+            <div className="bg-white/10 px-4 py-2 rounded-lg border border-white/10 backdrop-blur-sm">
+              <p className="text-[10px] text-blue-200 font-semibold uppercase tracking-wider mb-0.5">Reference ID</p>
+              <p className="text-sm font-mono font-bold">#{Math.random().toString(36).substr(2, 6).toUpperCase()}</p>
             </div>
           </div>
         </div>
 
-        <div className="p-6 md:p-16 space-y-8 md:space-y-16">
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6 md:gap-12 border-b border-slate-50 pb-6 md:pb-12">
+        <div className="p-8 space-y-8 bg-white">
+          {/* Patient Header */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 pb-6 border-b border-slate-100">
             <div>
-              <p className="text-[9px] text-slate-300 font-black uppercase tracking-[0.3em] mb-3">Patient Profile</p>
-              <p className="text-2xl font-black text-slate-900 tracking-tighter uppercase">{patient.name}</p>
+              <p className="text-xs text-slate-500 font-semibold uppercase tracking-wide mb-1">Patient</p>
+              <p className="text-xl font-bold text-slate-900">{patient.name}</p>
             </div>
             <div>
-              <p className="text-[9px] text-slate-300 font-black uppercase tracking-[0.3em] mb-3">Vitals Context</p>
-              <p className="text-2xl font-black text-slate-900 tracking-tighter uppercase">{patient.age}Y • {patient.gender}</p>
+              <p className="text-xs text-slate-500 font-semibold uppercase tracking-wide mb-1">Details</p>
+              <p className="text-xl font-bold text-slate-900">{patient.age} Y • {patient.gender}</p>
             </div>
-            <div className="md:text-right">
-              <p className="text-[9px] text-slate-300 font-black uppercase tracking-[0.3em] mb-3">Examination Date</p>
-              <p className="text-2xl font-black text-slate-900 tracking-tighter uppercase">{new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
+            <div className="sm:text-right">
+              <p className="text-xs text-slate-500 font-semibold uppercase tracking-wide mb-1">Date</p>
+              <p className="text-xl font-bold text-slate-900">{new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
             </div>
           </div>
 
-          <section className="bg-slate-50/50 p-6 md:p-12 rounded-2xl md:rounded-[3.5rem] border border-slate-100 shadow-inner">
-            <h3 className="text-[9px] font-black text-slate-300 mb-4 md:mb-6 uppercase tracking-[0.4em]">Primary Clinical Diagnosis</h3>
-            <p className="text-3xl md:text-5xl text-blue-900 font-black tracking-tighter leading-[1.1] mb-4 md:mb-8 uppercase">{report.diagnosis}</p>
-            <p className="text-base md:text-xl text-slate-600 leading-relaxed font-black italic border-l-4 md:border-l-[6px] border-blue-100 pl-4 md:pl-10 tracking-tight">"{report.patientSummary}"</p>
+          <section className="bg-slate-50 p-6 rounded-xl border border-slate-200">
+            <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-3">Primary Diagnosis</h3>
+            <p className="text-2xl text-blue-900 font-bold mb-3">{report.diagnosis}</p>
+            <p className="text-slate-700 leading-relaxed italic border-l-4 border-blue-300 pl-4">"{report.patientSummary}"</p>
           </section>
 
           <section>
-            <div className="flex items-center gap-4 md:gap-6 mb-6 md:mb-10">
-              <h3 className="text-[9px] font-black text-slate-300 uppercase tracking-[0.4em]">Therapeutic Intervention Plan</h3>
-              <div className="h-px bg-slate-100 flex-1"></div>
+            <div className="flex items-center gap-4 mb-6">
+              <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wide">Treatment Plan</h3>
+              <div className="h-px bg-slate-200 flex-1"></div>
             </div>
-            <div className="grid grid-cols-1 gap-4 md:gap-8">
+            <div className="grid grid-cols-1 gap-4">
               {report.prescriptions.map((p, i) => (
-                <div key={i} className="p-6 md:p-10 border border-slate-100 rounded-2xl md:rounded-[3rem] bg-white shadow-sm border-l-4 md:border-l-[12px] border-l-blue-600 hover:shadow-xl transition-all">
-                  <div className="flex justify-between items-start mb-8">
-                    <p className="font-black text-slate-900 text-3xl uppercase tracking-tighter">{p.medication}</p>
-                    <span className="bg-slate-950 text-white text-[10px] px-6 py-2 rounded-full font-black uppercase tracking-widest">{p.duration}</span>
+                <div key={i} className="p-6 border border-slate-200 rounded-xl bg-white shadow-sm hover:shadow-md transition-shadow border-l-4 border-l-blue-500 group">
+                  <div className="flex justify-between items-start mb-4">
+                    <p className="font-bold text-slate-900 text-lg group-hover:text-blue-700 transition-colors">{p.medication}</p>
+                    <span className="bg-slate-100 text-slate-600 text-xs px-3 py-1 rounded-full font-semibold">{p.duration}</span>
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 md:gap-10">
-                    <div className="bg-slate-50/50 p-6 rounded-2xl border border-slate-50">
-                      <p className="text-slate-300 text-[9px] font-black uppercase mb-2">Clinical Dosage</p>
-                      <p className="font-black text-slate-800 text-xl tracking-tight">{p.dosage}</p>
+                  <div className="grid grid-cols-2 gap-6 mb-4">
+                    <div>
+                      <p className="text-xs text-slate-500 font-semibold mb-1">Dosage</p>
+                      <p className="font-medium text-slate-800">{p.dosage}</p>
                     </div>
-                    <div className="bg-slate-50/50 p-6 rounded-2xl border border-slate-50">
-                      <p className="text-slate-300 text-[9px] font-black uppercase mb-2">Admin Frequency</p>
-                      <p className="font-black text-slate-800 text-xl tracking-tight">{p.frequency}</p>
+                    <div>
+                      <p className="text-xs text-slate-500 font-semibold mb-1">Frequency</p>
+                      <p className="font-medium text-slate-800">{p.frequency}</p>
                     </div>
                   </div>
                   {p.notes && (
-                    <div className="mt-8 flex gap-4 p-5 bg-blue-50/50 rounded-[1.5rem] border border-blue-100">
-                      <svg className="w-5 h-5 text-blue-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeWidth="3" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                      <p className="text-xs text-blue-700 font-black leading-relaxed uppercase tracking-wide">Physician Note: {p.notes}</p>
+                    <div className="flex gap-3 p-3 bg-blue-50/50 rounded-lg border border-blue-100 items-start">
+                      <MessageSquare className="w-4 h-4 text-blue-500 mt-0.5 shrink-0" />
+                      <p className="text-sm text-blue-800 font-medium">{p.notes}</p>
                     </div>
                   )}
                 </div>
@@ -1225,80 +1553,53 @@ const ReportView: React.FC<{ report: MedicalReport; patient: PatientInfo; onRese
 
           {report.recommendedTests && report.recommendedTests.length > 0 && (
             <section>
-              <div className="flex items-center gap-6 mb-10">
-                <h3 className="text-[9px] font-black text-slate-300 uppercase tracking-[0.4em]">Recommended Investigations</h3>
-                <div className="h-px bg-slate-100 flex-1"></div>
+              <div className="flex items-center gap-4 mb-6">
+                <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wide">Recommended Tests</h3>
+                <div className="h-px bg-slate-200 flex-1"></div>
               </div>
-              <div className="bg-gradient-to-br from-purple-50 via-violet-50 to-purple-50 p-10 rounded-[3rem] border-2 border-purple-200/60 shadow-lg relative overflow-hidden">
-                {/* Decorative elements */}
-                <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-bl from-purple-200/40 to-transparent rounded-full blur-2xl"></div>
-                <div className="absolute bottom-0 left-0 w-24 h-24 bg-gradient-to-tr from-violet-200/40 to-transparent rounded-full blur-xl"></div>
-
-                <div className="flex items-center gap-4 mb-8 relative z-10">
-                  <div className="p-3 bg-gradient-to-br from-purple-600 to-violet-600 rounded-2xl shadow-lg">
-                    <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeWidth="2.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
-                    </svg>
-                  </div>
-                  <div>
-                    <h4 className="text-[9px] font-black text-purple-700 uppercase tracking-[0.3em]">Laboratory & Diagnostic Tests</h4>
-                    <p className="text-xs text-purple-600 font-semibold">Essential investigations for accurate diagnosis</p>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 relative z-10">
+              <div className="bg-slate-50 p-6 rounded-xl border border-slate-200">
+                <div className="flex flex-col gap-3">
                   {report.recommendedTests.map((test, i) => (
-                    <div key={i} className="bg-white/80 backdrop-blur-sm p-5 rounded-2xl border-2 border-purple-200/50 hover:border-purple-400 hover:shadow-md transition-all group">
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 bg-gradient-to-br from-purple-100 to-violet-100 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform">
-                          <span className="text-purple-700 font-black text-sm">{i + 1}</span>
-                        </div>
-                        <p className="font-bold text-slate-800 text-base tracking-tight flex-1">{test}</p>
-                        <svg className="w-5 h-5 text-purple-400 opacity-0 group-hover:opacity-100 transition-opacity" fill="currentColor" viewBox="0 0 20 20">
-                          <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                        </svg>
+                    <div key={i} className="flex items-center gap-3 p-3 bg-white rounded-lg border border-slate-100 shadow-sm">
+                      <div className="p-2 bg-purple-100 text-purple-600 rounded-lg">
+                        <Activity className="w-5 h-5" />
                       </div>
+                      <span className="font-medium text-slate-800">{test}</span>
                     </div>
                   ))}
-                </div>
-
-                <div className="mt-6 p-4 bg-purple-100/50 rounded-2xl border border-purple-200 relative z-10">
-                  <p className="text-xs text-purple-800 font-semibold flex items-center gap-2">
-                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
-                    </svg>
-                    Please get these tests done from an accredited laboratory and bring the results for review.
-                  </p>
                 </div>
               </div>
             </section>
           )}
 
-          <section className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-12">
-            <div className="bg-red-50 p-6 md:p-10 rounded-2xl md:rounded-[3rem] border border-red-100 shadow-sm">
-              <h4 className="text-[9px] font-black text-red-600 uppercase mb-4 md:mb-6 tracking-[0.3em] flex items-center gap-3">
-                <div className="w-2 h-2 bg-red-600 rounded-full animate-ping"></div>
+          <section className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="bg-red-50 p-6 rounded-xl border border-red-100">
+              <h4 className="text-xs font-bold text-red-600 uppercase mb-3 tracking-wide flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 animate-pulse" />
                 Urgent Warnings
               </h4>
-              <p className="text-sm text-red-950 leading-relaxed font-black uppercase tracking-tight">{report.emergencyWarning}</p>
+              <p className="text-sm text-red-900 font-medium leading-relaxed">{report.emergencyWarning || "None reported."}</p>
             </div>
-            <div className="bg-blue-50 p-6 md:p-10 rounded-2xl md:rounded-[3rem] border border-blue-100 shadow-sm">
-              <h4 className="text-[9px] font-black text-blue-700 uppercase mb-4 md:mb-6 tracking-[0.3em] flex items-center gap-3">
-                <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeWidth="3" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                Next Clinical Steps
+            <div className="bg-blue-50 p-6 rounded-xl border border-blue-100">
+              <h4 className="text-xs font-bold text-blue-700 uppercase mb-3 tracking-wide flex items-center gap-2">
+                <ArrowRight className="w-4 h-4 text-blue-600" />
+                Next Steps
               </h4>
-              <p className="text-sm text-blue-950 leading-relaxed font-black uppercase tracking-tight">{report.followUp}</p>
+              <p className="text-sm text-blue-900 font-medium leading-relaxed">{report.followUp}</p>
             </div>
           </section>
         </div>
       </div>
 
-      <div className="flex flex-col md:flex-row justify-center gap-4 md:gap-8 no-print pb-10 md:pb-20">
-        <button onClick={() => window.print()} className="bg-slate-950 text-white px-16 py-6 rounded-[2rem] font-black uppercase tracking-[0.3em] text-[10px] shadow-2xl active:scale-95 transition-all flex items-center gap-4">
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeWidth="3" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" /></svg>
-          Download Assessment
+      <div className="flex flex-col sm:flex-row justify-center gap-4 no-print sm:max-w-md mx-auto">
+        <button onClick={() => window.print()} className="flex-1 bg-slate-900 text-white px-8 py-4 rounded-xl font-bold text-sm shadow-lg hover:bg-slate-800 hover:shadow-xl active:scale-95 transition-all flex items-center justify-center gap-2">
+          <Printer className="w-5 h-5" />
+          Print Report
         </button>
-        <button onClick={onReset} className="bg-white border-2 border-slate-100 text-slate-400 px-16 py-6 rounded-[2rem] font-black uppercase tracking-[0.3em] text-[10px] shadow-sm hover:bg-slate-50 transition-all">New Registry</button>
+        <button onClick={onReset} className="flex-1 bg-white border border-slate-200 text-slate-600 hover:text-slate-900 px-8 py-4 rounded-xl font-bold text-sm hover:bg-slate-50 transition-all shadow-sm flex items-center justify-center gap-2">
+          <RefreshCw className="w-4 h-4" />
+          New Consultation
+        </button>
       </div>
     </div>
   );
@@ -1317,6 +1618,48 @@ export default function App() {
   const [report, setReport] = useState<MedicalReport | null>(null);
   const [isLoadingReport, setIsLoadingReport] = useState(false);
   const [pastRecords, setPastRecords] = useState<ClinicalRecord[]>([]);
+  const [showExitConfirm, setShowExitConfirm] = useState(false);
+  const [pendingAction, setPendingAction] = useState<(() => void) | null>(null);
+
+  // Check if there's an active session that could be lost
+  const hasActiveSession = step === AppStep.CONSULTATION && messages.length > 0;
+
+  // Browser beforeunload handler to warn about losing data
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (hasActiveSession) {
+        e.preventDefault();
+        e.returnValue = 'You have an active consultation in progress. Are you sure you want to leave?';
+        return e.returnValue;
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [hasActiveSession]);
+
+  // Safe navigation handler that shows confirmation for active sessions
+  const safeNavigate = (action: () => void) => {
+    if (hasActiveSession) {
+      setPendingAction(() => action);
+      setShowExitConfirm(true);
+    } else {
+      action();
+    }
+  };
+
+  const confirmExit = () => {
+    if (pendingAction) {
+      pendingAction();
+      setPendingAction(null);
+    }
+    setShowExitConfirm(false);
+  };
+
+  const cancelExit = () => {
+    setPendingAction(null);
+    setShowExitConfirm(false);
+  };
 
   useEffect(() => {
     const loadRecords = async () => {
@@ -1367,7 +1710,8 @@ export default function App() {
   };
 
   const handleSendMessage = async (text: string, attachments: Attachment[] = []) => {
-    const userMessage: Message = { role: 'user', text, attachments };
+    const timestamp = new Date().toISOString();
+    const userMessage: Message = { role: 'user', text, attachments, timestamp };
     const updatedMessages = [...messages, userMessage];
     setMessages(updatedMessages);
     setIsProcessing(true);
@@ -1385,11 +1729,11 @@ export default function App() {
         options: options
       };
 
-      setMessages(prev => [...prev, { role: 'model', text: responseText, question }]);
+      setMessages(prev => [...prev, { role: 'model', text: responseText, question, timestamp: new Date().toISOString() }]);
     } catch (error) {
       console.error('Chat error:', error);
       const errorMessage = error instanceof Error ? error.message : 'An error occurred. Please try again.';
-      setMessages(prev => [...prev, { role: 'model', text: `Error: ${errorMessage}` }]);
+      setMessages(prev => [...prev, { role: 'model', text: `Error: ${errorMessage}`, timestamp: new Date().toISOString() }]);
     } finally {
       setIsProcessing(false);
     }
@@ -1398,6 +1742,14 @@ export default function App() {
   const getOptionsForQuestion = (question: string, conversationHistory: Message[]): Array<{ id: string; label: string }> => {
     // No checkbox options - users will type their responses
     return [];
+  };
+
+  // Retry failed messages by removing the error and resending
+  const handleRetryMessage = async (text: string, attachments?: Attachment[]) => {
+    // Remove the last two messages (user message + error response) and retry
+    setMessages(prev => prev.slice(0, -2));
+    await new Promise(resolve => setTimeout(resolve, 100)); // Brief delay for state update
+    handleSendMessage(text, attachments || []);
   };
 
   const generateReport = async () => {
@@ -1429,50 +1781,52 @@ export default function App() {
     setStep(AppStep.REPORT);
   };
 
+  const deleteRecord = async (recordId: string) => {
+    try {
+      await db.deleteRecord(recordId);
+      setPastRecords(prev => prev.filter(r => r.id !== recordId));
+    } catch (error) {
+      console.error('Failed to delete record:', error);
+      alert('Failed to delete record. Please try again.');
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-cyan-50/30 font-sans selection:bg-blue-200 selection:text-blue-900 relative overflow-hidden">
       {/* Animated background elements */}
-      <div className="fixed top-0 left-0 w-96 h-96 bg-gradient-to-br from-blue-200/20 to-cyan-200/20 rounded-full blur-3xl animate-pulse -z-10"></div>
-      <div className="fixed bottom-0 right-0 w-96 h-96 bg-gradient-to-tl from-violet-200/20 to-blue-200/20 rounded-full blur-3xl animate-pulse delay-1000 -z-10"></div>
+      <GlobalBackground />
 
-      <nav className="no-print bg-white/80 border-b-2 border-slate-200/50 px-4 md:px-8 py-4 md:py-5 flex items-center justify-between sticky top-0 z-50 backdrop-blur-xl shadow-lg relative">
-        {/* Gradient accent bar */}
-        <div className="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-blue-600 via-cyan-500 to-blue-600 opacity-80"></div>
-
+      <nav className="no-print bg-white/80 border-b border-slate-200/50 px-4 md:px-8 py-4 md:py-5 flex items-center justify-between sticky top-0 z-50 backdrop-blur-xl shadow-sm relative">
         <div className="flex items-center gap-4">
-          <button onClick={reset} className="w-14 h-14 bg-gradient-to-br from-blue-600 to-cyan-600 rounded-[1.25rem] flex items-center justify-center text-white shadow-xl shadow-blue-200/50 transition-all hover:scale-110 hover:rotate-12 active:scale-95 group relative overflow-hidden">
-            <div className="absolute inset-0 bg-gradient-to-tr from-cyan-600 to-blue-600 opacity-0 group-hover:opacity-100 transition-opacity"></div>
-            <svg className="w-7 h-7 relative z-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-            </svg>
+          <button onClick={() => safeNavigate(reset)} className="group relative">
+            <Logo className="w-12 h-12 md:w-14 md:h-14 transition-transform group-hover:scale-105" />
           </button>
           <div>
-            <span className="text-xl md:text-3xl font-black tracking-tighter cursor-pointer bg-gradient-to-r from-slate-800 via-blue-700 to-cyan-600 bg-clip-text text-transparent hover:from-blue-700 hover:via-cyan-600 hover:to-blue-700 transition-all" onClick={reset}>
-              VitalGuard <span className="text-cyan-600">Health</span>
+            <span className="text-xl md:text-3xl font-black tracking-tight cursor-pointer text-slate-900 group-hover:text-blue-600 transition-colors" onClick={() => safeNavigate(reset)}>
+              VitalGuard <span className="text-blue-600">Health</span>
             </span>
-            <p className="text-[8px] md:text-[9px] text-slate-500 font-black uppercase tracking-[0.15em] md:tracking-[0.2em] mt-0.5 hidden sm:block">AI-Powered Medical Intelligence</p>
+            <div className="flex items-center gap-2 mt-0.5">
+               <span className="h-0.5 w-8 bg-blue-500 rounded-full"></span>
+               <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest hidden sm:block">AI Medical Intelligence</p>
+            </div>
           </div>
         </div>
 
         <div className="flex items-center gap-2 md:gap-6">
           <LanguageSwitcher current={language} onChange={setLanguage} />
           <button
-            onClick={() => setStep(AppStep.HISTORY)}
-            className={`px-8 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all relative overflow-hidden group ${step === AppStep.HISTORY ? 'bg-gradient-to-r from-slate-900 to-slate-800 text-white shadow-2xl' : 'bg-gradient-to-r from-slate-100 to-slate-50 text-slate-600 hover:from-blue-50 hover:to-cyan-50 hover:text-blue-700 shadow-md border-2 border-slate-200 hover:border-blue-200'}`}
+            onClick={() => safeNavigate(() => setStep(AppStep.HISTORY))}
+            className={`px-6 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center gap-2 border ${step === AppStep.HISTORY ? 'bg-slate-900 text-white border-slate-900 shadow-md' : 'bg-white text-slate-600 border-slate-200 hover:border-blue-300 hover:text-blue-600'}`}
           >
-            <span className="relative z-10 flex items-center gap-2">
-              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                <path d="M4 3a2 2 0 100 4h12a2 2 0 100-4H4z" />
-                <path fillRule="evenodd" d="M3 8h14v7a2 2 0 01-2 2H5a2 2 0 01-2-2V8zm5 3a1 1 0 011-1h2a1 1 0 110 2H9a1 1 0 01-1-1z" clipRule="evenodd" />
-              </svg>
-              History Vault
-            </span>
-            {step !== AppStep.HISTORY && <div className="absolute inset-0 bg-gradient-to-r from-blue-600 to-cyan-600 opacity-0 group-hover:opacity-10 transition-opacity"></div>}
+            <History className="w-4 h-4" />
+            <span>History Vault</span>
           </button>
         </div>
       </nav>
 
       <main className="container mx-auto px-4 md:px-6 py-6 md:py-12 max-w-7xl">
+        <StepProgressIndicator currentStep={step} />
+        
         {step === AppStep.VITALS && (
           <VitalsForm
             onComplete={startConsultation}
@@ -1484,13 +1838,13 @@ export default function App() {
 
         {step === AppStep.CONSULTATION && (
           <div className="max-w-4xl mx-auto space-y-4 md:space-y-8">
-            <div className="bg-gradient-to-r from-blue-600 to-cyan-600 p-4 md:p-6 rounded-2xl md:rounded-[2.5rem] text-white flex items-start gap-3 md:gap-5 shadow-2xl shadow-blue-200/50 border-2 border-blue-400/30 relative overflow-hidden">
+            <div className="bg-gradient-to-br from-blue-600 to-blue-700 p-6 md:p-8 rounded-3xl text-white flex items-start gap-6 shadow-2xl shadow-blue-200/50 border border-blue-400/20 relative overflow-hidden animate-float">
               {/* Accent decoration */}
-              <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full blur-2xl"></div>
-              <div className="absolute bottom-0 left-0 w-24 h-24 bg-cyan-400/20 rounded-full blur-xl"></div>
+              <div className="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2"></div>
+              <div className="absolute bottom-0 left-0 w-32 h-32 bg-cyan-400/20 rounded-full blur-2xl"></div>
 
-              <div className="p-3 bg-white/20 rounded-2xl shrink-0 backdrop-blur-sm relative z-10">
-                <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeWidth="3" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+              <div className="p-4 bg-white/10 rounded-2xl shrink-0 backdrop-blur-md border border-white/20 relative z-10">
+                <Shield className="w-8 h-8 text-blue-100" />
               </div>
               <div className="space-y-1 relative z-10">
                 <p className="text-base font-black uppercase tracking-widest">AI Diagnostic Session Active</p>
@@ -1500,6 +1854,7 @@ export default function App() {
             <ChatInterface
               messages={messages}
               onSendMessage={handleSendMessage}
+              onRetryMessage={handleRetryMessage}
               isProcessing={isProcessing}
               onFinish={generateReport}
               patientName={patient.name}
@@ -1517,6 +1872,7 @@ export default function App() {
             records={pastRecords}
             onBack={reset}
             onSelect={showPastReport}
+            onDelete={deleteRecord}
           />
         )}
 
@@ -1532,6 +1888,44 @@ export default function App() {
             </div>
           </div>
         )}
+
+        {/* Exit Confirmation Modal */}
+        {showExitConfirm && (
+          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-xl flex items-center justify-center z-[100] animate-in fade-in duration-200">
+            <div className="bg-white p-8 md:p-12 rounded-[2.5rem] shadow-2xl max-w-md mx-4 animate-in zoom-in-95 duration-300">
+              <div className="flex items-center gap-4 mb-6">
+                <div className="p-4 bg-amber-100 rounded-2xl">
+                  <svg className="w-8 h-8 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="text-2xl font-black text-slate-800 tracking-tight">Leave Consultation?</h3>
+                  <p className="text-sm text-slate-500 font-medium">Your progress will be lost</p>
+                </div>
+              </div>
+              
+              <p className="text-slate-600 mb-8 leading-relaxed">
+                You have an active medical consultation in progress. If you leave now, all conversation data and any pending diagnosis will be permanently lost.
+              </p>
+              
+              <div className="flex flex-col sm:flex-row gap-3">
+                <button
+                  onClick={cancelExit}
+                  className="flex-1 px-6 py-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-2xl transition-all text-sm uppercase tracking-wider"
+                >
+                  Continue Session
+                </button>
+                <button
+                  onClick={confirmExit}
+                  className="flex-1 px-6 py-4 bg-red-500 hover:bg-red-600 text-white font-bold rounded-2xl transition-all text-sm uppercase tracking-wider"
+                >
+                  Leave Anyway
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </main>
 
       <footer className="no-print mt-32 py-16 border-t-2 border-slate-200/50 text-center relative">
@@ -1542,3 +1936,4 @@ export default function App() {
     </div>
   );
 }
+
