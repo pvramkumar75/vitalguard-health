@@ -219,12 +219,12 @@ export default function App() {
       <GlobalBackground />
 
       <nav className="no-print bg-white/75 border-b border-gray-200/60 px-4 md:px-8 py-4 flex items-center justify-between sticky top-0 z-50 backdrop-blur-2xl saturate-150 transition-all duration-300">
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2 md:gap-4">
           <button onClick={() => safeNavigate(reset)} className="group relative">
-            <Logo className="w-10 h-10 md:w-11 md:h-11 transition-transform group-hover:scale-105" />
+            <Logo className="w-8 h-8 md:w-11 md:h-11 transition-transform group-hover:scale-105" />
           </button>
-          <div>
-            <span className="text-xl font-bold tracking-tight cursor-pointer text-slate-900 group-hover:text-blue-600 transition-colors" onClick={() => safeNavigate(reset)}>
+          <div className="flex flex-col">
+            <span className="text-lg md:text-xl font-bold tracking-tight cursor-pointer text-slate-900 group-hover:text-blue-600 transition-colors leading-tight" onClick={() => safeNavigate(reset)}>
               VitalGuard <span className="text-blue-600">Health</span>
             </span>
           </div>
@@ -256,17 +256,17 @@ export default function App() {
 
         {step === AppStep.CONSULTATION && (
           <div className="max-w-4xl mx-auto space-y-4 md:space-y-8">
-            <div className="bg-gradient-to-br from-blue-600 to-blue-700 p-6 md:p-8 rounded-3xl text-white flex items-start gap-6 shadow-2xl shadow-blue-200/50 border border-blue-400/20 relative overflow-hidden animate-float">
-              {/* Accent decoration */}
-              <div className="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2"></div>
-              <div className="absolute bottom-0 left-0 w-32 h-32 bg-cyan-400/20 rounded-full blur-2xl"></div>
+            <div className="bg-gradient-to-br from-blue-600 to-blue-700 p-4 md:p-8 rounded-2xl md:rounded-3xl text-white flex items-center md:items-start gap-4 md:gap-6 shadow-2xl shadow-blue-200/50 border border-blue-400/20 relative overflow-hidden animate-float">
+              {/* Accent decoration - hidden on mobile to reduce noise */}
+              <div className="hidden md:block absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2"></div>
+              <div className="hidden md:block absolute bottom-0 left-0 w-32 h-32 bg-cyan-400/20 rounded-full blur-2xl"></div>
 
-              <div className="p-4 bg-white/10 rounded-2xl shrink-0 backdrop-blur-md border border-white/20 relative z-10">
-                <Shield className="w-8 h-8 text-blue-100" />
+              <div className="p-3 md:p-4 bg-white/10 rounded-xl md:rounded-2xl shrink-0 backdrop-blur-md border border-white/20 relative z-10">
+                <Shield className="w-6 h-6 md:w-8 md:h-8 text-blue-100" />
               </div>
-              <div className="space-y-1 relative z-10">
-                <p className="text-base font-black uppercase tracking-widest">AI Diagnostic Session Active</p>
-                <p className="text-[11px] text-blue-100 font-bold uppercase tracking-wide">6-10 questions for precision diagnosis • Medical terms in English</p>
+              <div className="space-y-0.5 md:space-y-1 relative z-10">
+                <p className="text-sm md:text-base font-black uppercase tracking-widest">AI Diagnostic Session Active</p>
+                <p className="text-[10px] md:text-[11px] text-blue-100 font-bold uppercase tracking-wide">6-10 questions for precision diagnosis • Medical terms in English</p>
               </div>
             </div>
             <ChatInterface
@@ -296,13 +296,10 @@ export default function App() {
 
         {isLoadingReport && (
           <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-2xl flex items-center justify-center z-[100]">
-            <div className="bg-white p-16 rounded-[4rem] shadow-2xl text-center max-w-lg border-t-[12px] border-gradient-to-r from-blue-600 to-cyan-600 animate-in zoom-in-95 relative overflow-hidden">
-              {/* Animated gradient background */}
-              <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-blue-600 via-cyan-500 to-blue-600 animate-pulse"></div>
-
-              <div className="w-24 h-24 border-8 border-blue-100 border-t-blue-600 rounded-full animate-spin mx-auto mb-10 shadow-2xl"></div>
-              <h3 className="text-4xl font-black bg-gradient-to-r from-slate-800 to-blue-900 bg-clip-text text-transparent tracking-tighter uppercase mb-4">Finalizing Assessment</h3>
-              <p className="text-slate-500 text-[10px] font-black uppercase tracking-[0.3em] leading-relaxed px-10">Compiling AI-powered diagnostic summary...</p>
+            <div className="bg-white/95 backdrop-blur-xl p-8 rounded-3xl shadow-2xl text-center max-w-sm w-full mx-4 border border-white/50 animate-in zoom-in-95 relative overflow-hidden ring-1 ring-slate-900/5">
+              <div className="w-16 h-16 border-4 border-slate-100 border-t-blue-600 rounded-full animate-spin mx-auto mb-6"></div>
+              <h3 className="text-xl font-bold text-slate-800 mb-2">Finalizing Assessment</h3>
+              <p className="text-slate-500 text-xs font-medium uppercase tracking-wider">Compiling diagnostic summary...</p>
             </div>
           </div>
         )}
