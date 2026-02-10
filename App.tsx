@@ -108,10 +108,24 @@ export default function App() {
     setPatient(data);
     setStep(AppStep.CONSULTATION);
     if (messages.length === 0) {
+      // Build a rich context string with all available patient info
+      const contextParts: string[] = [];
+      contextParts.push(`Patient: ${data.name}, Age: ${data.age}, Gender: ${data.gender}`);
+      if (data.weight) contextParts.push(`Weight: ${data.weight} kg`);
+      if (data.height) contextParts.push(`Height: ${data.height} cm`);
+      if (data.weight && data.height) {
+        const bmi = (parseFloat(data.weight) / ((parseFloat(data.height) / 100) ** 2)).toFixed(1);
+        contextParts.push(`BMI: ${bmi}`);
+      }
+      if (data.history?.trim()) contextParts.push(`Medical History: ${data.history.trim()}`);
+      if (data.allergies?.trim()) contextParts.push(`Known Allergies: ${data.allergies.trim()}`);
+
+      const patientContext = contextParts.join('. ');
+
       const initTexts: Record<Language, string> = {
-        en: `Registry Complete. Initializing assessment for ${data.name}. Ready to hear clinical concerns.`,
-        hi: `पंजीकरण पूर्ण हुआ। ${data.name} के लिए मूल्यांकन शुरू किया जा रहा है। अपनी स्वास्थ्य समस्याओं के बारे में बताएं।`,
-        te: `రిజిస్ట్రేషన్ పూర్తయింది. ${data.name} కోసం పరీక్ష ప్రారంభించబడుతోంది. మీ ఆరోగ్య సమస్యలను తెలియజేయండి.`
+        en: `Registry Complete. ${patientContext}. Initializing assessment. Ready to hear clinical concerns.`,
+        hi: `पंजीकरण पूर्ण हुआ। ${patientContext}. मूल्यांकन शुरू किया जा रहा है। अपनी स्वास्थ्य समस्याओं के बारे में बताएं।`,
+        te: `రిజిస్ట్రేషన్ పూర్తయింది. ${patientContext}. పరీక్ష ప్రారంభించబడుతోంది. మీ ఆరోగ్య సమస్యలను తెలియజేయండి.`
       };
       handleSendMessage(initTexts[language], []);
     }
