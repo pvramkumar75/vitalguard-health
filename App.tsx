@@ -456,6 +456,9 @@ const VitalsForm: React.FC<{
   const [touched, setTouched] = useState<{[key: string]: boolean}>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [savedPatientInfo, setSavedPatientInfo] = useState<PatientInfo | null>(null);
+  const [heightUnit, setHeightUnit] = useState<'cm' | 'ft'>('cm');
+  const [heightFeet, setHeightFeet] = useState('');
+  const [heightInches, setHeightInches] = useState('');
 
   // Load saved patient info from localStorage on mount
   useEffect(() => {
@@ -502,6 +505,17 @@ const VitalsForm: React.FC<{
         if (value && (parseFloat(value) < 0 || parseFloat(value) > 500)) return 'Please enter a valid weight';
         return '';
       case 'height':
+        if (heightUnit === 'ft') {
+          // In feet mode, validate feet and inches separately
+          if (heightFeet || heightInches) {
+            const ft = parseFloat(heightFeet || '0');
+            const inches = parseFloat(heightInches || '0');
+            if (isNaN(ft) || isNaN(inches)) return 'Please enter valid numbers';
+            if (ft < 0 || ft > 9) return 'Feet must be between 0-9';
+            if (inches < 0 || inches >= 12) return 'Inches must be between 0-11';
+          }
+          return '';
+        }
         if (value && isNaN(parseFloat(value))) return 'Please enter a valid number';
         if (value && (parseFloat(value) < 0 || parseFloat(value) > 300)) return 'Please enter a valid height';
         return '';
@@ -707,18 +721,106 @@ const VitalsForm: React.FC<{
               <ErrorMessage field="weight" />
             </div>
             <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-2">Height (cm)</label>
-              <input
-                type="number"
-                min="0"
-                max="300"
-                step="0.1"
-                className={getInputClassName('height', "input-premium")}
-                value={formData.height}
-                onChange={(e) => handleChange('height', e.target.value)}
-                onBlur={() => handleBlur('height')}
-                placeholder="e.g. 175"
-              />
+              <div className="flex items-center justify-between mb-2">
+                <label className="block text-sm font-semibold text-slate-700">Height</label>
+                <div className="flex items-center bg-slate-100 rounded-lg p-0.5 border border-slate-200">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setHeightUnit('cm');
+                      setHeightFeet('');
+                      setHeightInches('');
+                      handleChange('height', '');
+                    }}
+                    className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${
+                      heightUnit === 'cm'
+                        ? 'bg-white text-blue-700 shadow-sm border border-blue-200'
+                        : 'text-slate-500 hover:text-slate-700'
+                    }`}
+                  >
+                    cm
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setHeightUnit('ft');
+                      handleChange('height', '');
+                    }}
+                    className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${
+                      heightUnit === 'ft'
+                        ? 'bg-white text-blue-700 shadow-sm border border-blue-200'
+                        : 'text-slate-500 hover:text-slate-700'
+                    }`}
+                  >
+                    ft · in
+                  </button>
+                </div>
+              </div>
+              {heightUnit === 'cm' ? (
+                <input
+                  type="number"
+                  min="0"
+                  max="300"
+                  step="0.1"
+                  className={getInputClassName('height', "input-premium")}
+                  value={formData.height}
+                  onChange={(e) => handleChange('height', e.target.value)}
+                  onBlur={() => handleBlur('height')}
+                  placeholder="e.g. 175"
+                />
+              ) : (
+                <div className="flex gap-2">
+                  <div className="flex-1">
+                    <div className="relative">
+                      <input
+                        type="number"
+                        min="0"
+                        max="9"
+                        step="1"
+                        className={getInputClassName('height', "input-premium pr-10")}
+                        value={heightFeet}
+                        onChange={(e) => {
+                          const ft = e.target.value;
+                          setHeightFeet(ft);
+                          const inches = parseFloat(heightInches || '0');
+                          const totalCm = ((parseFloat(ft || '0') * 12) + inches) * 2.54;
+                          handleChange('height', totalCm > 0 ? totalCm.toFixed(1) : '');
+                        }}
+                        onBlur={() => handleBlur('height')}
+                        placeholder="5"
+                      />
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-slate-400">ft</span>
+                    </div>
+                  </div>
+                  <div className="flex-1">
+                    <div className="relative">
+                      <input
+                        type="number"
+                        min="0"
+                        max="11"
+                        step="1"
+                        className={getInputClassName('height', "input-premium pr-10")}
+                        value={heightInches}
+                        onChange={(e) => {
+                          const inches = e.target.value;
+                          setHeightInches(inches);
+                          const ft = parseFloat(heightFeet || '0');
+                          const totalCm = ((ft * 12) + parseFloat(inches || '0')) * 2.54;
+                          handleChange('height', totalCm > 0 ? totalCm.toFixed(1) : '');
+                        }}
+                        onBlur={() => handleBlur('height')}
+                        placeholder="8"
+                      />
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-slate-400">in</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+              {formData.height && heightUnit === 'ft' && (
+                <p className="mt-1.5 text-xs text-slate-400 font-medium">
+                  ≈ {formData.height} cm
+                </p>
+              )}
               <ErrorMessage field="height" />
             </div>
           </div>
@@ -726,14 +828,27 @@ const VitalsForm: React.FC<{
 
         <div>
           <label className="block text-sm font-semibold text-slate-700 mb-2">
-            Medical History & Allergies
+            Medical History
           </label>
           <textarea
             className="input-premium min-h-[100px] resize-none"
             value={formData.history}
             onChange={(e) => setFormData({ ...formData, history: e.target.value })}
-            placeholder="Please describe any known conditions, allergies, or previous surgeries..."
+            placeholder="e.g. Diabetes since 2018, Hypertension, previous knee surgery in 2020..."
             maxLength={2000}
+          ></textarea>
+        </div>
+
+        <div>
+          <label className="block text-sm font-semibold text-slate-700 mb-2">
+            Known Allergies
+          </label>
+          <textarea
+            className="input-premium min-h-[80px] resize-none"
+            value={formData.allergies}
+            onChange={(e) => setFormData({ ...formData, allergies: e.target.value })}
+            placeholder="e.g. Penicillin, Sulfa drugs, Peanuts, Latex..."
+            maxLength={1000}
           ></textarea>
         </div>
 
@@ -1700,10 +1815,24 @@ export default function App() {
     setPatient(data);
     setStep(AppStep.CONSULTATION);
     if (messages.length === 0) {
+      // Build a rich context string with all available patient info
+      const contextParts: string[] = [];
+      contextParts.push(`Patient: ${data.name}, Age: ${data.age}, Gender: ${data.gender}`);
+      if (data.weight) contextParts.push(`Weight: ${data.weight} kg`);
+      if (data.height) contextParts.push(`Height: ${data.height} cm`);
+      if (data.weight && data.height) {
+        const bmi = (parseFloat(data.weight) / ((parseFloat(data.height) / 100) ** 2)).toFixed(1);
+        contextParts.push(`BMI: ${bmi}`);
+      }
+      if (data.history?.trim()) contextParts.push(`Medical History: ${data.history.trim()}`);
+      if (data.allergies?.trim()) contextParts.push(`Known Allergies: ${data.allergies.trim()}`);
+
+      const patientContext = contextParts.join('. ');
+
       const initTexts: Record<Language, string> = {
-        en: `Registry Complete. Initializing assessment for ${data.name}. Ready to hear clinical concerns.`,
-        hi: `पंजीकरण पूर्ण हुआ। ${data.name} के लिए मूल्यांकन शुरू किया जा रहा है। अपनी स्वास्थ्य समस्याओं के बारे में बताएं।`,
-        te: `రిజిస్ట్రేషన్ పూర్తయింది. ${data.name} కోసం పరీక్ష ప్రారంభించబడుతోంది. మీ ఆరోగ్య సమస్యలను తెలియజేయండి.`
+        en: `Registry Complete. ${patientContext}. Initializing assessment. Ready to hear clinical concerns.`,
+        hi: `पंजीकरण पूर्ण हुआ। ${patientContext}. मूल्यांकन शुरू किया जा रहा है। अपनी स्वास्थ्य समस्याओं के बारे में बताएं।`,
+        te: `రిజిస్ట్రేషన్ పూర్తయింది. ${patientContext}. పరీక్ష ప్రారంభించబడుతోంది. మీ ఆరోగ్య సమస్యలను తెలియజేయండి.`
       };
       handleSendMessage(initTexts[language], []);
     }

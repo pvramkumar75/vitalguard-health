@@ -77,18 +77,31 @@ export const getMedicalReport = async (
     return msgContent;
   }).join('\n');
 
+  // Build detailed patient profile for the report
+  const patientDetails: string[] = [`Patient: ${patient.name} (${patient.age}/${patient.gender})`];
+  if (patient.weight) patientDetails.push(`Weight: ${patient.weight} kg`);
+  if (patient.height) patientDetails.push(`Height: ${patient.height} cm`);
+  if (patient.weight && patient.height) {
+    const bmi = (parseFloat(patient.weight) / ((parseFloat(patient.height) / 100) ** 2)).toFixed(1);
+    patientDetails.push(`BMI: ${bmi}`);
+  }
+  if (patient.history?.trim()) patientDetails.push(`Medical History: ${patient.history.trim()}`);
+  if (patient.allergies?.trim()) patientDetails.push(`Known Allergies: ${patient.allergies.trim()}`);
+
   const prompt = `${contextPrompt}Based on the following patient data and full consultation history, generate a comprehensive Indian clinical report.
-  
-  Patient: ${patient.name} (${patient.age}/${patient.gender})
-  Consultation Log:
-  ${consultationLog}
-  
-  IMPORTANT: Include:
-  1. A definitive diagnosis (or differential diagnosis)
-  2. Prescription plan using generic and common Indian brand names
-  3. **Recommended Blood Tests and Lab Investigations** - Based on the diagnosis, suggest specific tests like CBC, Blood Sugar, Lipid Profile, Liver Function Test, Kidney Function Test, Thyroid Profile, X-Ray, ECG, Ultrasound, or any other relevant diagnostic tests that would help confirm the diagnosis or monitor the condition
-  
-  The output must be valid JSON matching the schema provided.`;
+   
+   ${patientDetails.join('\n   ')}
+   Consultation Log:
+   ${consultationLog}
+   
+   IMPORTANT: Include:
+   1. A definitive diagnosis (or differential diagnosis)
+   2. Prescription plan using generic and common Indian brand names
+   3. **Recommended Blood Tests and Lab Investigations** - Based on the diagnosis, suggest specific tests like CBC, Blood Sugar, Lipid Profile, Liver Function Test, Kidney Function Test, Thyroid Profile, X-Ray, ECG, Ultrasound, or any other relevant diagnostic tests that would help confirm the diagnosis or monitor the condition
+   4. Consider the patient's known allergies (if any) when prescribing medications — NEVER prescribe medications the patient is allergic to
+   5. Factor in the patient's medical history, weight, and BMI when making treatment decisions
+   
+   The output must be valid JSON matching the schema provided.`;
 
   try {
     const ai = getAIClient();
@@ -152,9 +165,24 @@ export const getChatResponse = async (
 
   const model = 'gemini-3-flash-preview';
 
+  // Build a rich patient context including vitals, history, and allergies
+  const patientContextParts: string[] = [];
+  if (patient.weight) patientContextParts.push(`Weight: ${patient.weight} kg`);
+  if (patient.height) patientContextParts.push(`Height: ${patient.height} cm`);
+  if (patient.weight && patient.height) {
+    const bmi = (parseFloat(patient.weight) / ((parseFloat(patient.height) / 100) ** 2)).toFixed(1);
+    patientContextParts.push(`BMI: ${bmi}`);
+  }
+  if (patient.history?.trim()) patientContextParts.push(`Medical History: ${patient.history.trim()}`);
+  if (patient.allergies?.trim()) patientContextParts.push(`Known Allergies: ${patient.allergies.trim()}`);
+
+  const patientProfile = patientContextParts.length > 0
+    ? ` Patient Profile — ${patientContextParts.join('; ')}.`
+    : '';
+
   const historyContext = pastRecords.length > 0
-    ? `Continuing care for ${patient.name}. History: ${pastRecords.map(r => r.report?.diagnosis).join(', ')}.`
-    : `First session for ${patient.name}.`;
+    ? `Continuing care for ${patient.name} (${patient.age}/${patient.gender}).${patientProfile} Past Diagnoses: ${pastRecords.map(r => r.report?.diagnosis).filter(Boolean).join(', ')}.`
+    : `First session for ${patient.name} (${patient.age}/${patient.gender}).${patientProfile}`;
 
   const GEMINI_INLINE_TYPES = new Set([
     'image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/heic', 'image/heif', 'image/gif', 'image/bmp', 'image/tiff',
